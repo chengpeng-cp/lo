@@ -1,0 +1,13 @@
+# 构建产物
+.build/
+.swiftpm/
+Package.resolved
+
+# rime-ice 社区词库由 scripts/fetch-dict.sh 按需下载，不提交进仓库
+LOInputMethod/Resources/rime/cn_dicts/
+
+# 旧版繁体词典备份（本地保留参考，不入库）
+LOInputMethod/Resources/rime/luna_pinyin.dict.yaml.legacy
+
+# macOS
+.DS_Store

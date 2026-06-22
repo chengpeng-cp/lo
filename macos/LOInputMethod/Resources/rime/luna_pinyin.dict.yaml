@@ -1,0 +1,28 @@
+# Rime dictionary
+# encoding: utf-8
+#
+# 语镜拼音词典（聚合 rime-ice 雾凇拼音社区词库）
+#
+# 本文件只作为词典入口，通过 import_tables 聚合 rime-ice 的子词典。
+# 子词典文件（cn_dicts/*.dict.yaml）由 scripts/fetch-dict.sh 按需下载，
+# 不提交进仓库（.gitignore 已忽略 cn_dicts/）。
+#
+# rime-ice 词库特点：简体、常用词丰富、词频合理，
+# 替换原 7 万条繁体+生僻字词典（见 luna_pinyin.dict.yaml.legacy）。
+#
+# 若未下载词库，Rime 部署时会忽略缺失的 import_tables 项，仅用本文件自身词条（为空），
+# 此时候选词会很少——请先运行 `make fetch-dict`。
+
+---
+name: luna_pinyin
+version: "2024.02.10"
+sort: by_weight
+use_preset_vocabulary: false
+import_tables:
+  - cn_dicts/8105
+  - cn_dicts/41448
+  - cn_dicts/base
+  - cn_dicts/ext
+  - cn_dicts/tencent
+  - cn_dicts/others
+...
