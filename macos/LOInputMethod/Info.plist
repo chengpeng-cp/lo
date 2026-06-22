@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 基本信息 -->
+    <key>CFBundleIdentifier</key>
+    <string>com.lo.inputmethod.ime</string>
+
+    <key>CFBundleExecutable</key>
+    <string>LOInputMethod</string>
+
+    <key>CFBundleName</key>
+    <string>语镜</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>语镜</string>
+
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <!-- 输入法连接名，需与 IMKServer 初始化时一致 -->
+    <key>InputMethodConnectionName</key>
+    <string>LOInputMethod_Connection</string>
+
+    <!-- 输入法控制器类（必须，系统通过此名查找控制器） -->
+    <key>InputMethodServerControllerClass</key>
+    <string>LOInputController</string>
+
+    <!-- 输入法代理类 -->
+    <key>InputMethodServerDelegateClass</key>
+    <string>LOInputController</string>
+
+    <!-- 隐藏 Dock 图标但保持前台事件接收 -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- 最低系统版本 -->
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+
+    <!-- 主类 -->
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <!-- 支持的字符集 -->
+    <key>tsInputMethodCharacterRepertoireKey</key>
+    <array>
+        <string>Hans</string>
+        <string>Hant</string>
+        <string>Latn</string>
+    </array>
+
+    <!-- 输入法语言：简体中文，让系统正确分类和切换 -->
+    <key>TISIntendedLanguage</key>
+    <string>zh-Hans</string>
+
+    <!-- 启用 CapsLock 切换 ABC（对齐 fcitx5-macos 方案）
+         把 CapsLock→ABC 交给 macOS 系统原生处理，输入法进程无需拦截事件、
+         无需辅助功能权限、无需 CGEventTap。系统原生行为：
+           语镜中文模式下按 CapsLock → 切到 ABC（系统处理）
+           ABC 下按 CapsLock → 切回上一个中文输入法（通常即语镜）
+         前提：系统中不要同时启用多个中文输入法，否则回切可能切到别的。 -->
+    <key>TICapsLockLanguageSwitchCapable</key>
+    <true/>
+
+    <!-- 输入法模式列表（关键：必须放在 ComponentInputModeDict 下） -->
+    <key>ComponentInputModeDict</key>
+    <dict>
+        <key>tsInputModeListKey</key>
+        <dict>
+            <key>com.lo.inputmethod.ime.pinyin</key>
+            <dict>
+                <key>TISInputSourceID</key>
+                <string>com.lo.inputmethod.ime.pinyin</string>
+                <key>TISIntendedLanguage</key>
+                <string>zh-Hans</string>
+                <key>tsInputModeDefaultStateKey</key>
+                <true/>
+                <key>tsInputModeIsVisibleKey</key>
+                <true/>
+                <key>tsInputModePrimaryInScriptKey</key>
+                <true/>
+                <key>tsInputModeScriptKey</key>
+                <string>smSimpChinese</string>
+            </dict>
+        </dict>
+        <key>tsVisibleInputModeOrderedArrayKey</key>
+        <array>
+            <string>com.lo.inputmethod.ime.pinyin</string>
+        </array>
+    </dict>
+
+    <!-- 网络安全配置 -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+</dict>
+</plist>

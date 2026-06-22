@@ -1,0 +1,10 @@
+# 语镜输入法全局自定义配置
+# 此文件覆盖 default.yaml 中的默认值
+
+patch:
+  # 候选词数量
+  "menu/page_size": 9
+
+  # 切换方案快捷键
+  "switcher/hotkeys":
+    - "Control+Shift+grave"
