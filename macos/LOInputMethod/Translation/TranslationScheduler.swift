@@ -57,8 +57,8 @@ class TranslationScheduler {
     // MARK: - 初始化
 
     private init() {
-        // 默认使用 DeepSeek 翻译器
-        self.translator = DeepSeekTranslator()
+        // 根据设置创建翻译器
+        self.translator = Self.createTranslator(for: LOSettings.load())
     }
 
     // MARK: - 公开接口
@@ -136,14 +136,38 @@ class TranslationScheduler {
         segmentTimeoutTimer = nil
     }
 
-    /// 更新翻译服务（切换翻译提供商时调用）
-    func updateTranslator(provider: String) {
-        switch provider {
-        case "google":
-            translator = GoogleTranslator()
-        default:
-            translator = DeepSeekTranslator()
+    /// 更新翻译服务（切换翻译提供商或模型时调用）
+    func updateTranslator() {
+        translator = Self.createTranslator(for: LOSettings.load())
+    }
+
+    // MARK: - 翻译器工厂
+
+    /// 根据设置创建翻译器
+    /// - LLM 提供商未配置 API Key 时，自动回退到必应免费翻译
+    private static func createTranslator(for settings: LOSettings) -> TranslationServiceProtocol {
+        let provider = TranslationProvider.from(settings.translationProvider)
+
+        // 免费翻译引擎
+        if provider == .bing {
+            return BingTranslator()
         }
+
+        // 大模型翻译：检查 API Key
+        let apiKey = settings.getAPIKey(provider: provider.rawValue) ?? ""
+        if apiKey.isEmpty {
+            debugLog("[Scheduler] \(provider.rawValue) 未配置 API Key，回退到必应免费翻译")
+            return BingTranslator()
+        }
+
+        // 检查模型名是否已配置
+        let model = settings.translationModel
+        if model.isEmpty {
+            debugLog("[Scheduler] \(provider.rawValue) 未配置模型名，回退到必应免费翻译")
+            return BingTranslator()
+        }
+
+        return LLMTranslator(provider: provider, model: model)
     }
 
     // MARK: - 文本过滤

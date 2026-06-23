@@ -9,8 +9,14 @@ struct LOSettings {
 
     // MARK: - 设置项
 
-    /// 翻译服务提供商：deepseek / google
+    /// 翻译服务提供商：deepseek / glm / qwen / kimi / minimax / openai / volcengine / custom / bing
     var translationProvider: String = "deepseek"
+
+    /// 当前提供商的翻译模型（内存中的当前值，持久化按提供商分别存储）
+    var translationModel: String = ""
+
+    /// 自定义提供商的 API 端点（仅 provider == custom 时使用）
+    var customLLMBaseURL: String = ""
 
     /// 翻译模式：fluent / native / literal
     var translationMode: String = "fluent"
@@ -56,6 +62,8 @@ struct LOSettings {
 
     private enum Keys {
         static let translationProvider = "LO_translationProvider"
+        static let translationModelPrefix = "LO_translationModel_" // 按提供商分别存储：LO_translationModel_deepseek
+        static let customLLMBaseURL = "LO_customLLMBaseURL"
         static let translationMode = "LO_translationMode"
         static let overlayPositionMode = "LO_overlayPositionMode"
         static let overlayFixedPositionLegacy = "LO_overlayFixedPosition"
@@ -83,6 +91,9 @@ struct LOSettings {
         var settings = LOSettings()
 
         settings.translationProvider = defaults.string(forKey: Keys.translationProvider) ?? "deepseek"
+        // 加载当前提供商对应的模型名
+        settings.translationModel = defaults.string(forKey: Keys.translationModelPrefix + settings.translationProvider) ?? ""
+        settings.customLLMBaseURL = defaults.string(forKey: Keys.customLLMBaseURL) ?? ""
         settings.translationMode = defaults.string(forKey: Keys.translationMode) ?? "fluent"
         // 位置模式：优先读新键，不存在则从旧键迁移
         if let mode = defaults.string(forKey: Keys.overlayPositionMode) {
@@ -116,6 +127,9 @@ struct LOSettings {
         let defaults = UserDefaults.standard
 
         defaults.set(translationProvider, forKey: Keys.translationProvider)
+        // 按提供商分别存储模型名
+        defaults.set(translationModel, forKey: Keys.translationModelPrefix + translationProvider)
+        defaults.set(customLLMBaseURL, forKey: Keys.customLLMBaseURL)
         defaults.set(translationMode, forKey: Keys.translationMode)
         defaults.set(overlayPositionMode, forKey: Keys.overlayPositionMode)
         defaults.set(Double(overlayPosition.x), forKey: Keys.overlayPositionX)
@@ -129,10 +143,17 @@ struct LOSettings {
         defaults.set(shiftLongPressThreshold, forKey: Keys.shiftLongPressThreshold)
     }
 
+    /// 加载指定提供商保存的模型名（切换提供商时调用）
+    /// - Parameter provider: 提供商 rawValue
+    /// - Returns: 该提供商上次保存的模型名，无则返回空字符串
+    static func loadModel(forProvider provider: String) -> String {
+        return UserDefaults.standard.string(forKey: Keys.translationModelPrefix + provider) ?? ""
+    }
+
     // MARK: - Keychain API 密钥管理
 
     /// 获取指定提供商的 API 密钥
-    /// - Parameter provider: 提供商名称（deepseek / google）
+    /// - Parameter provider: 提供商名称（deepseek / glm / qwen / kimi / minimax / openai / volcengine / custom）
     /// - Returns: API 密钥，如果不存在则返回 nil
     func getAPIKey(provider: String) -> String? {
         let key = "apikey_\(provider)"
@@ -159,7 +180,7 @@ struct LOSettings {
 
     /// 设置指定提供商的 API 密钥
     /// - Parameters:
-    ///   - provider: 提供商名称（deepseek / google）
+    ///   - provider: 提供商名称（deepseek / glm / qwen / kimi / minimax / openai / volcengine / custom）
     ///   - key: API 密钥
     func setAPIKey(provider: String, key: String) {
         let account = "apikey_\(provider)"
