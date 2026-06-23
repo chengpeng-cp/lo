@@ -67,7 +67,7 @@ class RimeEngine {
         // Rime 会在内部使用这些指针，setup/initialize 返回后不再需要
         let sharedDataDirC = strdup(sharedDataDir)
         let userDirC = strdup(userDir)
-        let distNameC = strdup("语镜输入法")
+        let distNameC = strdup("语境输入法")
         let distCodeNameC = strdup("lo")
         let distVersionC = strdup("0.1")
         let appNameC = strdup("rime.lo")

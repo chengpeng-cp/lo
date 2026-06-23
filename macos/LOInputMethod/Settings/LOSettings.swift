@@ -15,19 +15,19 @@ struct LOSettings {
     /// 翻译模式：fluent / native / literal
     var translationMode: String = "fluent"
 
-    /// 悬浮窗是否固定位置（true=固定屏幕右侧不可拖动，false=可自由拖动且位置记忆）
-    var overlayFixedPosition: Bool = false
+    /// 悬浮窗位置模式：fixed（固定屏幕右侧）/ draggable（可自由拖动）/ followCursor（跟随光标）
+    var overlayPositionMode: String = "draggable"
 
     /// 构造翻译浮窗配置
     var overlayConfig: OverlayConfig {
         return OverlayConfig(
-            isFixedPosition: overlayFixedPosition,
+            positionMode: OverlayPositionMode(rawValue: overlayPositionMode) ?? .draggable,
             autoDismissInterval: autoDismissInterval,
             opacity: CGFloat(overlayOpacity)
         )
     }
 
-    /// 悬浮窗位置（仅当 overlayFixedPosition 为 true 时使用）
+    /// 悬浮窗位置（仅 draggable 模式下记忆使用）
     var overlayPosition: NSPoint = NSPoint(x: 0, y: 0)
 
     /// 悬浮窗自动消失时间（秒）
@@ -57,7 +57,8 @@ struct LOSettings {
     private enum Keys {
         static let translationProvider = "LO_translationProvider"
         static let translationMode = "LO_translationMode"
-        static let overlayFixedPosition = "LO_overlayFixedPosition"
+        static let overlayPositionMode = "LO_overlayPositionMode"
+        static let overlayFixedPositionLegacy = "LO_overlayFixedPosition"
         static let overlayPositionX = "LO_overlayPositionX"
         static let overlayPositionY = "LO_overlayPositionY"
         static let autoDismissInterval = "LO_autoDismissInterval"
@@ -83,10 +84,12 @@ struct LOSettings {
 
         settings.translationProvider = defaults.string(forKey: Keys.translationProvider) ?? "deepseek"
         settings.translationMode = defaults.string(forKey: Keys.translationMode) ?? "fluent"
-        settings.overlayFixedPosition = defaults.bool(forKey: Keys.overlayFixedPosition)
-        // overlayFixedPosition 默认为 false（可拖动），key 不存在时用默认值
-        if defaults.object(forKey: Keys.overlayFixedPosition) == nil {
-            settings.overlayFixedPosition = false
+        // 位置模式：优先读新键，不存在则从旧键迁移
+        if let mode = defaults.string(forKey: Keys.overlayPositionMode) {
+            settings.overlayPositionMode = mode
+        } else if defaults.object(forKey: Keys.overlayFixedPositionLegacy) != nil {
+            // 旧版本用 bool 存储，转换为新枚举
+            settings.overlayPositionMode = defaults.bool(forKey: Keys.overlayFixedPositionLegacy) ? "fixed" : "draggable"
         }
         let posX = defaults.double(forKey: Keys.overlayPositionX)
         let posY = defaults.double(forKey: Keys.overlayPositionY)
@@ -114,7 +117,7 @@ struct LOSettings {
 
         defaults.set(translationProvider, forKey: Keys.translationProvider)
         defaults.set(translationMode, forKey: Keys.translationMode)
-        defaults.set(overlayFixedPosition, forKey: Keys.overlayFixedPosition)
+        defaults.set(overlayPositionMode, forKey: Keys.overlayPositionMode)
         defaults.set(Double(overlayPosition.x), forKey: Keys.overlayPositionX)
         defaults.set(Double(overlayPosition.y), forKey: Keys.overlayPositionY)
         defaults.set(autoDismissInterval, forKey: Keys.autoDismissInterval)

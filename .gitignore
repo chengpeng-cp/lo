@@ -12,3 +12,6 @@ macos/LOInputMethod/Resources/rime/luna_pinyin.dict.yaml.legacy
 
 # macOS
 macos/.DS_Store
+
+# 日志（软链接到 ~/Library/Logs/LOInputMethod/translation.log）
+log/

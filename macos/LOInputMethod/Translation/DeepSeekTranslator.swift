@@ -23,6 +23,8 @@ class DeepSeekTranslator: TranslationServiceProtocol {
             throw TranslationError.apiKeyNotConfigured
         }
 
+        debugLog("[DeepSeek] 开始翻译: mode=\(mode.rawValue) text='\(text)' (长度=\(text.count))")
+
         // 构建请求
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -39,24 +41,32 @@ class DeepSeekTranslator: TranslationServiceProtocol {
                 ["role": "user", "content": text]
             ],
             "temperature": 0.3,
-            "max_tokens": 2048
+            "max_tokens": 4096
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        debugLog("[DeepSeek] 请求: model=\(model) mode=\(mode.rawValue)")
 
         // 发送请求
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
+            debugLog("[DeepSeek] 网络请求失败: \(error.localizedDescription)")
             throw TranslationError.networkError(error)
         }
 
         // 检查 HTTP 状态码
         guard let httpResponse = response as? HTTPURLResponse else {
+            debugLog("[DeepSeek] 响应类型异常")
             throw TranslationError.invalidResponse
         }
+        debugLog("[DeepSeek] HTTP 状态码: \(httpResponse.statusCode), 响应长度: \(data.count) bytes")
+
         guard httpResponse.statusCode == 200 else {
             // 尝试解析错误信息
+            let bodySnippet = String(data: data.prefix(500), encoding: .utf8) ?? "(二进制)"
+            debugLog("[DeepSeek] 非 200 响应体: \(bodySnippet)")
             if let errorBody = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let errorDict = errorBody["error"] as? [String: Any],
                let message = errorDict["message"] as? String {
@@ -66,7 +76,9 @@ class DeepSeekTranslator: TranslationServiceProtocol {
         }
 
         // 解析响应
-        return try parseResponse(data)
+        let result = try parseResponse(data)
+        debugLog("[DeepSeek] 翻译结果: '\(result)' (长度=\(result.count))")
+        return result
     }
 
     // MARK: - 私有方法

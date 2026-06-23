@@ -25,7 +25,7 @@ class LOSettingsWindow: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "语镜设置"
+        window.title = "语境输入法设置"
         window.isReleasedWhenClosed = false
         window.center()
 

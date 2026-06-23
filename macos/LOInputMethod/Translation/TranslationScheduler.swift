@@ -37,6 +37,9 @@ class TranslationScheduler {
     /// 线程安全锁
     private let lock = NSLock()
 
+    /// 当前进行中的翻译任务，发起新翻译前取消旧任务，避免竞态
+    private var currentTranslationTask: Task<Void, Never>?
+
     // MARK: - 回调
 
     /// 防抖期间静默更新原文（用于显示正在输入的原文）
@@ -48,6 +51,9 @@ class TranslationScheduler {
     /// 翻译完成（原文, 译文）
     var onTranslationReady: ((String, String) -> Void)?
 
+    /// 翻译失败（原文, 错误信息）
+    var onTranslationFailed: ((String, String) -> Void)?
+
     // MARK: - 初始化
 
     private init() {
@@ -56,6 +62,23 @@ class TranslationScheduler {
     }
 
     // MARK: - 公开接口
+
+    /// 通知调度器用户正在输入（按键、组合输入中）。
+    /// 用于刷新「段落超时」判定基准：用户输入拼音时并无 commit 事件产生，
+    /// 但这段时间用户并未真的停顿，不应触发段落断句，否则前面已 commit 的数字/字母会被丢弃。
+    /// - Parameter text: 当前组合输入的预编辑文本（可为空，仅表示有按键活动）
+    func noteTyping(preedit: String = "") {
+        lock.lock()
+        // 仅刷新时间基准与段落超时定时器，不改变 currentSegment
+        lastCommitTime = Date()
+        lock.unlock()
+
+        // 重置段落超时定时器，避免输入拼音中途段落被截断
+        resetSegmentTimeoutTimer()
+
+        // 若用户已开始组合输入新内容，也重置短防抖定时器，确保最终翻译在输入停止后触发
+        resetDebounceTimer()
+    }
 
     /// 提交待翻译文本
     /// 会先判断是否需要开启新段落，然后启动防抖计时
@@ -66,13 +89,16 @@ class TranslationScheduler {
         let isSegmentEmpty = currentSegment.isEmpty
         // 空段落且文本无需翻译时直接跳过；非空段落则允许追加（如标点）
         guard !isSegmentEmpty || shouldTranslate(text) else {
+            debugLog("[Scheduler] commit 跳过（无需翻译）: '\(text)'")
             lock.unlock()
             return
         }
 
         let now = Date()
+        let elapsed = now.timeIntervalSince(lastCommitTime)
         // 长停顿超过阈值，开启新段落
-        if now.timeIntervalSince(lastCommitTime) > settings.segmentPauseThreshold {
+        if !isSegmentEmpty && elapsed > settings.segmentPauseThreshold {
+            debugLog("[Scheduler] 段落超时重置: elapsed=\(elapsed)s threshold=\(settings.segmentPauseThreshold)s 旧段落='\(currentSegment)'")
             currentSegment = ""
         }
 
@@ -86,6 +112,8 @@ class TranslationScheduler {
 
         let segmentToUpdate = currentSegment
         lock.unlock()
+
+        debugLog("[Scheduler] commit: '\(text)' → 段落='\(segmentToUpdate)'")
 
         // 通知原文更新
         onOriginalUpdate?(segmentToUpdate)
@@ -206,8 +234,11 @@ class TranslationScheduler {
 
         guard !text.isEmpty else { return }
 
+        debugLog("[Scheduler] 触发翻译: '\(text)' (长度=\(text.count))")
+
         // 检查缓存
         if let cached = cache.get(text: text) {
+            debugLog("[Scheduler] 命中缓存")
             onTranslationReady?(text, cached)
             return
         }
@@ -218,11 +249,20 @@ class TranslationScheduler {
         // 获取当前翻译模式
         let mode = TranslationMode(rawValue: settings.translationMode) ?? .fluent
 
+        // 取消进行中的旧翻译任务，避免旧结果/错误覆盖当前状态
+        currentTranslationTask?.cancel()
+
         // 异步执行翻译
-        Task { [weak self] in
+        let task = Task { [weak self] in
             guard let self = self else { return }
             do {
                 let result = try await self.translator.translate(text: text, mode: mode)
+                // 任务被取消时不再回调（用户已输入新内容，旧结果无意义）
+                if Task.isCancelled {
+                    debugLog("[Scheduler] 翻译已取消（旧任务）: '\(text)'")
+                    return
+                }
+                debugLog("[Scheduler] 翻译完成: '\(text)' → '\(result)'")
                 // 缓存结果
                 self.cache.set(text: text, translation: result)
                 // 回调主线程
@@ -230,9 +270,20 @@ class TranslationScheduler {
                     self.onTranslationReady?(text, result)
                 }
             } catch {
-                // 翻译失败，静默处理（不弹窗打断用户）
-                print("[TranslationScheduler] 翻译失败：\(error.localizedDescription)")
+                // 任务被取消（包括 URLSession 取消错误）时不回调
+                if Task.isCancelled {
+                    debugLog("[Scheduler] 翻译已取消（旧任务，错误阶段）: '\(text)'")
+                    return
+                }
+                // 翻译失败，通知 UI 更新（避免悬浮窗一直卡在 loading 状态）
+                let errorMsg = error.localizedDescription
+                debugLog("[Scheduler] 翻译失败: '\(text)' 错误: \(errorMsg)")
+                print("[TranslationScheduler] 翻译失败：\(errorMsg)")
+                DispatchQueue.main.async {
+                    self.onTranslationFailed?(text, errorMsg)
+                }
             }
         }
+        currentTranslationTask = task
     }
 }
