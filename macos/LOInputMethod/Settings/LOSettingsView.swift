@@ -17,17 +17,32 @@ class LOSettingsView: NSView {
     /// 翻译服务下拉框
     private var providerPopup: NSPopUpButton!
 
+    /// 模型输入框（大模型提供商使用，用户手动输入模型名称）
+    private var modelField: NSTextField!
+
+    /// 模型行（含标签+输入框），免费方案时隐藏
+    private var modelRow: NSView!
+
+    /// 自定义 API 端点输入框（仅 custom 提供商显示）
+    private var customBaseURLField: NSTextField!
+
+    /// 自定义端点行
+    private var customBaseURLRow: NSView!
+
     /// API 密钥输入框（使用普通 NSTextField，支持粘贴）
     private var apiKeyField: NSTextField!
 
     /// 验证按钮
     private var verifyButton: NSButton!
 
-    /// API 密钥行（含标签+输入框+验证按钮），Google 免费方案时隐藏
+    /// API 密钥行（含标签+输入框+验证按钮），免费方案时隐藏
     private var apiKeyRow: NSView!
 
-    /// Google 免费方案提示行
-    private var googleFreeHintRow: NSView!
+    /// 免费方案提示行（选择免费翻译时显示）
+    private var freeHintRow: NSView!
+
+    /// 未配置 API Key 的兜底提示行（LLM 提供商无 key 时显示）
+    private var fallbackHintRow: NSView!
 
     /// 翻译模式下拉框
     private var modePopup: NSPopUpButton!
@@ -173,6 +188,45 @@ class LOSettingsView: NSView {
         fatalError("init(coder:) 未实现")
     }
 
+    // MARK: - 键盘快捷键
+
+    /// 输入法进程为 LSUIElement 后台 app，无主菜单 Edit 菜单，
+    /// 导致 NSTextField 的 Cmd+A/C/V/X/Z 等标准编辑快捷键失效。
+    /// 此处拦截 key equivalent，手动转发给当前聚焦的 field editor。
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // 仅处理 Cmd 组合键
+        guard event.modifierFlags.contains(.command) else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        // 获取当前聚焦的 field editor
+        guard let window = self.window,
+              let fieldEditor = window.firstResponder as? NSTextView else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        let action: Selector?
+        switch event.charactersIgnoringModifiers {
+        case "a": action = NSSelectorFromString("selectAll:")
+        case "c": action = NSSelectorFromString("copy:")
+        case "v": action = NSSelectorFromString("paste:")
+        case "x": action = NSSelectorFromString("cut:")
+        default:  action = nil
+        }
+
+        guard let action = action else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        // 尝试让 field editor 执行对应命令
+        if fieldEditor.responds(to: action) {
+            fieldEditor.perform(action, with: nil)
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
     // MARK: - 刷新设置
 
     func reloadSettings() {
@@ -197,8 +251,13 @@ class LOSettingsView: NSView {
         mainStack.addArrangedSubview(spacer(sectionSpacing))
         mainStack.addArrangedSubview(makeProviderRow())
         mainStack.addArrangedSubview(spacer(rowSpacing))
+        mainStack.addArrangedSubview(makeModelRow())
+        mainStack.addArrangedSubview(spacer(rowSpacing))
+        mainStack.addArrangedSubview(makeCustomBaseURLRow())
+        mainStack.addArrangedSubview(spacer(rowSpacing))
         mainStack.addArrangedSubview(makeAPIKeyRow())
-        mainStack.addArrangedSubview(makeGoogleFreeHintRow())
+        mainStack.addArrangedSubview(makeFreeHintRow())
+        mainStack.addArrangedSubview(makeFallbackHintRow())
 
         mainStack.addArrangedSubview(spacer(sectionSpacing))
         mainStack.addArrangedSubview(makeSeparator())
@@ -338,10 +397,46 @@ class LOSettingsView: NSView {
 
     private func makeProviderRow() -> NSView {
         providerPopup = NSPopUpButton()
-        providerPopup.addItems(withTitles: ["DeepSeek", "Google Translate"])
+        providerPopup.addItems(withTitles: TranslationProvider.allCases.map { $0.displayName })
         providerPopup.target = self
         providerPopup.action = #selector(providerChanged)
         return makeRow(label: "服务提供商：", control: providerPopup)
+    }
+
+    /// 构建模型输入行：标签 + 输入框（用户手动输入模型名称）
+    private func makeModelRow() -> NSView {
+        modelField = NSTextField()
+        modelField.placeholderString = "模型名称"
+        modelField.drawsBackground = true
+        modelField.backgroundColor = NSColor.textBackgroundColor
+        modelField.isBezeled = true
+        modelField.bezelStyle = .roundedBezel
+        modelField.target = self
+        modelField.action = #selector(modelFieldChanged)
+        modelField.translatesAutoresizingMaskIntoConstraints = false
+        modelField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        modelField.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
+
+        let row = makeRow(label: "模型：", control: modelField)
+        modelRow = row
+        return row
+    }
+
+    /// 构建自定义 API 端点输入行（仅 custom 提供商显示）
+    private func makeCustomBaseURLRow() -> NSView {
+        customBaseURLField = NSTextField()
+        customBaseURLField.placeholderString = "https://your-api-endpoint/v1/chat/completions"
+        customBaseURLField.drawsBackground = true
+        customBaseURLField.backgroundColor = NSColor.textBackgroundColor
+        customBaseURLField.isBezeled = true
+        customBaseURLField.bezelStyle = .roundedBezel
+        customBaseURLField.translatesAutoresizingMaskIntoConstraints = false
+        customBaseURLField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        customBaseURLField.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
+
+        let row = makeRow(label: "API 端点：", control: customBaseURLField)
+        customBaseURLRow = row
+        return row
     }
 
     private func makeAPIKeyRow() -> NSView {
@@ -384,13 +479,13 @@ class LOSettingsView: NSView {
         return row
     }
 
-    /// 构建 Google 免费方案提示行（仅在选择 Google 时显示）
-    private func makeGoogleFreeHintRow() -> NSView {
-        let label = NSTextField(labelWithString: "使用免费网页接口，无需 API Key")
+    /// 构建免费方案提示行（选择免费翻译引擎时显示）
+    private func makeFreeHintRow() -> NSView {
+        let label = NSTextField(labelWithString: "免费翻译，无需 API Key")
         label.font = NSFont.systemFont(ofSize: 11)
         label.textColor = NSColor.secondaryLabelColor
 
-        let prefixLabel = NSTextField(labelWithString: "API 密钥：")
+        let prefixLabel = NSTextField(labelWithString: "提示：")
         prefixLabel.alignment = .right
         prefixLabel.translatesAutoresizingMaskIntoConstraints = false
         prefixLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -406,7 +501,33 @@ class LOSettingsView: NSView {
         row.addArrangedSubview(prefixLabel)
         row.addArrangedSubview(label)
 
-        googleFreeHintRow = row
+        freeHintRow = row
+        return row
+    }
+
+    /// 构建兜底提示行（LLM 提供商未配置 API Key 时显示）
+    private func makeFallbackHintRow() -> NSView {
+        let label = NSTextField(labelWithString: "未配置 API Key，将自动使用必应免费翻译兜底")
+        label.font = NSFont.systemFont(ofSize: 11)
+        label.textColor = NSColor.systemOrange
+
+        let prefixLabel = NSTextField(labelWithString: "提示：")
+        prefixLabel.alignment = .right
+        prefixLabel.translatesAutoresizingMaskIntoConstraints = false
+        prefixLabel.setContentHuggingPriority(.required, for: .horizontal)
+        prefixLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        prefixLabel.widthAnchor.constraint(equalToConstant: labelWidth).isActive = true
+
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 6
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
+        row.addArrangedSubview(prefixLabel)
+        row.addArrangedSubview(label)
+
+        fallbackHintRow = row
         return row
     }
 
@@ -573,14 +694,22 @@ class LOSettingsView: NSView {
 
     private func updateControlsFromSettings() {
         // 翻译服务
-        providerPopup.selectItem(at: settings.translationProvider == "google" ? 1 : 0)
+        let provider = TranslationProvider.from(settings.translationProvider)
+        let providerIndex = TranslationProvider.allCases.firstIndex(of: provider) ?? 0
+        providerPopup.selectItem(at: providerIndex)
+
+        // 模型：直接使用用户保存的模型名，不再自动填充默认模型
+        modelField.stringValue = settings.translationModel
+
+        // 自定义端点
+        customBaseURLField.stringValue = settings.customLLMBaseURL
 
         // API 密钥
         let currentProvider = settings.translationProvider
         apiKeyField.stringValue = settings.getAPIKey(provider: currentProvider) ?? ""
 
-        // 根据提供商切换 API Key 行 / 免费提示行的显示
-        updateAPIKeyRowVisibility()
+        // 根据提供商切换各行的显示
+        updateProviderRowVisibility()
 
         // 翻译模式
         let modeIndex = TranslationMode.allCases.firstIndex(where: { $0.rawValue == settings.translationMode }) ?? 0
@@ -616,18 +745,49 @@ class LOSettingsView: NSView {
     // MARK: - 控件事件
 
     @objc private func providerChanged() {
-        let isGoogle = providerPopup.indexOfSelectedItem == 1
-        settings.translationProvider = isGoogle ? "google" : "deepseek"
+        let index = providerPopup.indexOfSelectedItem
+        let provider = TranslationProvider.allCases[index]
+        settings.translationProvider = provider.rawValue
+
+        // 切换提供商时，加载该提供商上次保存的模型名（无则留空）
+        let savedModel = LOSettings.loadModel(forProvider: provider.rawValue)
+        settings.translationModel = savedModel
+        modelField.stringValue = savedModel
+
         apiKeyField.stringValue = settings.getAPIKey(provider: settings.translationProvider) ?? ""
-        updateAPIKeyRowVisibility()
+        updateProviderRowVisibility()
     }
 
-    /// 根据当前翻译提供商切换 API Key 行与免费提示行的显示
-    /// Google 使用免费网页接口，无需 API Key；DeepSeek 需要 API Key
-    private func updateAPIKeyRowVisibility() {
-        let isGoogle = settings.translationProvider == "google"
-        apiKeyRow.isHidden = isGoogle
-        googleFreeHintRow.isHidden = !isGoogle
+    /// 模型输入框内容变化
+    @objc private func modelFieldChanged() {
+        settings.translationModel = modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 根据当前翻译提供商切换模型行、自定义端点行、API Key 行与提示行的显示
+    private func updateProviderRowVisibility() {
+        let provider = TranslationProvider.from(settings.translationProvider)
+        let isFree = provider.isFree
+        let isCustom = provider == .custom
+
+        // 模型行：仅 LLM 提供商显示
+        modelRow.isHidden = isFree
+
+        // 自定义端点行：仅 custom 提供商显示
+        customBaseURLRow.isHidden = !isCustom
+
+        // API Key 行：仅需要 API Key 的提供商显示
+        apiKeyRow.isHidden = isFree
+
+        // 免费提示行：仅免费翻译引擎显示
+        freeHintRow.isHidden = !isFree
+
+        // 兜底提示行：LLM 提供商且未配置 API Key 时显示
+        if !isFree {
+            let apiKey = settings.getAPIKey(provider: provider.rawValue) ?? ""
+            fallbackHintRow.isHidden = !apiKey.isEmpty
+        } else {
+            fallbackHintRow.isHidden = true
+        }
     }
 
     @objc private func modeChanged() {
@@ -636,15 +796,18 @@ class LOSettingsView: NSView {
     }
 
     @objc private func verifyAPIKey() {
-        let provider = settings.translationProvider
+        // 先提交所有输入框的未保存编辑，确保验证使用的是用户当前输入的内容
+        commitPendingEdits()
 
-        // Google 使用免费网页接口，无需 API Key，直接测试连接
-        if provider == "google" {
+        let provider = TranslationProvider.from(settings.translationProvider)
+
+        // 免费翻译引擎，直接测试连接
+        if provider.isFree {
             verifyButton.isEnabled = false
             verifyButton.title = "测试中..."
 
             let mode = TranslationMode(rawValue: settings.translationMode) ?? .fluent
-            let translator = GoogleTranslator()
+            let translator: TranslationServiceProtocol = BingTranslator()
 
             Task { [weak self] in
                 do {
@@ -652,7 +815,7 @@ class LOSettingsView: NSView {
                     DispatchQueue.main.async {
                         self?.verifyButton.isEnabled = true
                         self?.verifyButton.title = "验证"
-                        self?.showAlert(title: "连接成功", message: "Google 免费翻译接口可用")
+                        self?.showAlert(title: "连接成功", message: "\(provider.displayName) 接口可用")
                     }
                 } catch {
                     DispatchQueue.main.async {
@@ -665,19 +828,38 @@ class LOSettingsView: NSView {
             return
         }
 
-        // DeepSeek 需要 API Key
+        // 大模型翻译：需要 API Key
         let apiKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !apiKey.isEmpty else {
             showAlert(title: "验证失败", message: "请先输入 API 密钥")
             return
         }
-        settings.setAPIKey(provider: provider, key: apiKey)
+
+        // 模型名称（直接从输入框读取，无需先保存）
+        let model = modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.isEmpty else {
+            showAlert(title: "验证失败", message: "请先输入模型名称")
+            return
+        }
+
+        // 自定义提供商需要填写端点
+        if provider == .custom {
+            let baseURL = customBaseURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !baseURL.isEmpty else {
+                showAlert(title: "验证失败", message: "请先填写 API 端点")
+                return
+            }
+            settings.customLLMBaseURL = baseURL
+        }
+
+        // 临时保存 API Key 以便验证（LLMTranslator 从 Keychain 读取）
+        settings.setAPIKey(provider: provider.rawValue, key: apiKey)
 
         verifyButton.isEnabled = false
         verifyButton.title = "验证中..."
 
         let mode = TranslationMode(rawValue: settings.translationMode) ?? .fluent
-        let translator: TranslationServiceProtocol = DeepSeekTranslator()
+        let translator = LLMTranslator(provider: provider, model: model)
 
         Task { [weak self] in
             do {
@@ -685,7 +867,7 @@ class LOSettingsView: NSView {
                 DispatchQueue.main.async {
                     self?.verifyButton.isEnabled = true
                     self?.verifyButton.title = "验证"
-                    self?.showAlert(title: "验证成功", message: "API 密钥有效")
+                    self?.showAlert(title: "验证成功", message: "API 密钥有效，模型 \(model) 可用")
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -695,6 +877,22 @@ class LOSettingsView: NSView {
                 }
             }
         }
+    }
+
+    /// 提交所有输入框中未保存的编辑（field editor 持有的文本）
+    private func commitPendingEdits() {
+        if let editor = apiKeyField.currentEditor() {
+            apiKeyField.stringValue = editor.string
+        }
+        if let editor = modelField.currentEditor() {
+            modelField.stringValue = editor.string
+        }
+        if let editor = customBaseURLField.currentEditor() {
+            customBaseURLField.stringValue = editor.string
+        }
+        // 同步到 settings 内存对象
+        settings.translationModel = modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings.customLLMBaseURL = customBaseURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     @objc private func positionModeChanged() {
@@ -785,11 +983,8 @@ class LOSettingsView: NSView {
 
     @objc private func saveSettings() {
         // 强制提交所有正在编辑的输入框，确保用户输入的最新值被保存
-        // 修复：用户在数值输入框输入值后未按回车/点击步进器，直接点保存时，
-        // field editor 持有未提交文本，settings 仍为旧值，导致输入未被保存
-        if let editor = apiKeyField.currentEditor() {
-            apiKeyField.stringValue = editor.string
-        }
+        commitPendingEdits()
+
         for (field, config) in numberRowConfigs {
             if let editor = field.currentEditor() {
                 field.stringValue = editor.string
@@ -808,7 +1003,7 @@ class LOSettingsView: NSView {
             settings.setAPIKey(provider: settings.translationProvider, key: apiKey)
         }
         settings.save()
-        TranslationScheduler.shared.updateTranslator(provider: settings.translationProvider)
+        TranslationScheduler.shared.updateTranslator()
         NotificationCenter.default.post(name: .LOSettingsDidChange, object: nil)
 
         if let btn = saveButtonRef {

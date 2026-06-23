@@ -1,29 +1,55 @@
 import Foundation
 
-// MARK: - DeepSeek 翻译器
+// MARK: - 大模型翻译器（OpenAI 兼容）
 
-/// 基于 DeepSeek API 的翻译器
-/// 使用 deepseek-chat 模型进行翻译
-class DeepSeekTranslator: TranslationServiceProtocol {
+/// 通用大模型翻译器，兼容所有 OpenAI Chat Completions 接口的提供商
+/// 支持 DeepSeek、GLM、Qwen、Kimi、MiniMax、OpenAI、火山引擎等
+class LLMTranslator: TranslationServiceProtocol {
 
-    /// API 端点
-    private let endpoint = URL(string: "https://api.deepseek.com/v1/chat/completions")!
+    /// 提供商
+    private let provider: TranslationProvider
 
     /// 模型名称
-    private let model = "deepseek-chat"
+    private let model: String
 
     /// 请求超时时间
     private let timeoutInterval: TimeInterval = 30
 
+    // MARK: - 初始化
+
+    init(provider: TranslationProvider, model: String) {
+        self.provider = provider
+        self.model = model
+    }
+
     // MARK: - 翻译服务协议
 
     func translate(text: String, mode: TranslationMode) async throws -> String {
+        // 自定义提供商需要从设置读取 baseURL
+        let endpoint: URL
+        if provider == .custom {
+            let settings = LOSettings.load()
+            let urlStr = settings.customLLMBaseURL
+            guard !urlStr.isEmpty else {
+                throw TranslationError.apiError("自定义提供商未配置 API 端点")
+            }
+            guard let url = URL(string: urlStr) else {
+                throw TranslationError.apiError("自定义 API 端点格式无效")
+            }
+            endpoint = url
+        } else {
+            guard let url = URL(string: provider.baseURL) else {
+                throw TranslationError.invalidResponse
+            }
+            endpoint = url
+        }
+
         // 获取 API 密钥
-        guard let apiKey = LOSettings.load().getAPIKey(provider: "deepseek"), !apiKey.isEmpty else {
+        guard let apiKey = LOSettings.load().getAPIKey(provider: provider.rawValue), !apiKey.isEmpty else {
             throw TranslationError.apiKeyNotConfigured
         }
 
-        debugLog("[DeepSeek] 开始翻译: mode=\(mode.rawValue) text='\(text)' (长度=\(text.count))")
+        debugLog("[LLM] \(provider.rawValue) 开始翻译: model=\(model) mode=\(mode.rawValue) text='\(text)' (长度=\(text.count))")
 
         // 构建请求
         var request = URLRequest(url: endpoint)
@@ -45,28 +71,27 @@ class DeepSeekTranslator: TranslationServiceProtocol {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        debugLog("[DeepSeek] 请求: model=\(model) mode=\(mode.rawValue)")
+        debugLog("[LLM] \(provider.rawValue) 请求: model=\(model) mode=\(mode.rawValue)")
 
         // 发送请求
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
-            debugLog("[DeepSeek] 网络请求失败: \(error.localizedDescription)")
+            debugLog("[LLM] \(provider.rawValue) 网络请求失败: \(error.localizedDescription)")
             throw TranslationError.networkError(error)
         }
 
         // 检查 HTTP 状态码
         guard let httpResponse = response as? HTTPURLResponse else {
-            debugLog("[DeepSeek] 响应类型异常")
+            debugLog("[LLM] \(provider.rawValue) 响应类型异常")
             throw TranslationError.invalidResponse
         }
-        debugLog("[DeepSeek] HTTP 状态码: \(httpResponse.statusCode), 响应长度: \(data.count) bytes")
+        debugLog("[LLM] \(provider.rawValue) HTTP 状态码: \(httpResponse.statusCode), 响应长度: \(data.count) bytes")
 
         guard httpResponse.statusCode == 200 else {
-            // 尝试解析错误信息
             let bodySnippet = String(data: data.prefix(500), encoding: .utf8) ?? "(二进制)"
-            debugLog("[DeepSeek] 非 200 响应体: \(bodySnippet)")
+            debugLog("[LLM] \(provider.rawValue) 非 200 响应体: \(bodySnippet)")
             if let errorBody = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let errorDict = errorBody["error"] as? [String: Any],
                let message = errorDict["message"] as? String {
@@ -77,7 +102,7 @@ class DeepSeekTranslator: TranslationServiceProtocol {
 
         // 解析响应
         let result = try parseResponse(data)
-        debugLog("[DeepSeek] 翻译结果: '\(result)' (长度=\(result.count))")
+        debugLog("[LLM] \(provider.rawValue) 翻译结果: '\(result)' (长度=\(result.count))")
         return result
     }
 
@@ -95,7 +120,7 @@ class DeepSeekTranslator: TranslationServiceProtocol {
         }
     }
 
-    /// 解析 DeepSeek API 的 JSON 响应
+    /// 解析 OpenAI 兼容 API 的 JSON 响应
     private func parseResponse(_ data: Data) throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw TranslationError.invalidResponse
