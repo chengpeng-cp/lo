@@ -9,11 +9,17 @@
     <key>CFBundleExecutable</key>
     <string>LOInputMethod</string>
 
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
     <key>CFBundleName</key>
-    <string>语镜</string>
+    <string>语境输入法</string>
 
     <key>CFBundleDisplayName</key>
-    <string>语镜</string>
+    <string>语境输入法</string>
+
+    <key>InputMethodDisplayName</key>
+    <string>语境输入法</string>
 
     <key>CFBundleVersion</key>
     <string>1.0.0</string>
@@ -26,6 +32,12 @@
 
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh_CN</string>
+
+    <key>LSHasLocalizedDisplayName</key>
+    <true/>
 
     <!-- 输入法连接名，需与 IMKServer 初始化时一致 -->
     <key>InputMethodConnectionName</key>
@@ -83,6 +95,14 @@
                 <string>com.lo.inputmethod.ime.pinyin</string>
                 <key>TISIntendedLanguage</key>
                 <string>zh-Hans</string>
+                <key>tsInputModeNameKey</key>
+                <string>语境输入法</string>
+                <key>tsInputModeMenuTextKey</key>
+                <string>语境输入法</string>
+                <key>tsInputModeAlternateMenuTextKey</key>
+                <string>语境输入法</string>
+                <key>KeyboardLayout Name</key>
+                <string>语境输入法</string>
                 <key>tsInputModeDefaultStateKey</key>
                 <true/>
                 <key>tsInputModeIsVisibleKey</key>

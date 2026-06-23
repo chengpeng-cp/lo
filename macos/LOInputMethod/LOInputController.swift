@@ -5,21 +5,30 @@ import os.log
 
 // MARK: - 调试日志
 
-/// 写入日志文件（~/Library/Rime/LOInputMethod.log）
+/// 写入日志文件（~/Library/Logs/LOInputMethod/translation.log）
+/// 项目 log/ 目录下有软链接指向此文件，方便开发时查看
 func debugLog(_ message: String) {
     let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
-    let logPath = home + "/Library/Rime/LOInputMethod.log"
+    let logDir = home + "/Library/Logs/LOInputMethod"
+    let logPath = logDir + "/translation.log"
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let line = "[\(timestamp)] \(message)\n"
+
+    // 确保日志目录存在
+    let fm = FileManager.default
+    if !fm.fileExists(atPath: logDir) {
+        try? fm.createDirectory(atPath: logDir, withIntermediateDirectories: true)
+    }
+
     if let data = line.data(using: .utf8) {
-        if FileManager.default.fileExists(atPath: logPath) {
+        if fm.fileExists(atPath: logPath) {
             if let handle = FileHandle(forWritingAtPath: logPath) {
                 handle.seekToEndOfFile()
                 handle.write(data)
                 handle.closeFile()
             }
         } else {
-            FileManager.default.createFile(atPath: logPath, contents: data)
+            fm.createFile(atPath: logPath, contents: data)
         }
     }
 }
@@ -98,6 +107,10 @@ class LOInputController: IMKInputController {
             translationScheduler.onTranslationReady = { [weak self] original, translation in
                 self?.translationOverlay.show(originalText: original, translation: translation)
             }
+            // 翻译失败：显示错误，避免悬浮窗卡在 loading 状态
+            translationScheduler.onTranslationFailed = { [weak self] original, error in
+                self?.translationOverlay.showError(originalText: original, error: error)
+            }
         }
 
         // 监听设置变更：实时更新悬浮窗配置（位置模式、透明度、自动消失等）
@@ -156,6 +169,15 @@ class LOInputController: IMKInputController {
 
         // 标记当前控制器为激活状态，供 CGEventTap 切输入法前提交预编辑文本。
         LOInputController.activeController = self
+
+        // 设置光标位置提供者，供翻译浮窗跟随光标模式定位使用
+        LOTranslationOverlay.shared.cursorPositionProvider = { [weak self] in
+            guard let self = self,
+                  let client = self.client() as? IMKTextInput else { return nil }
+            var rect = NSRect.zero
+            _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
+            return rect
+        }
 
         // 重置修饰键状态：用空集初始化，让首次 flagsChanged 自然计算 changes
         lastModifiers = []
@@ -305,6 +327,16 @@ class LOInputController: IMKInputController {
         // 将按键交给 Rime 处理
         let handled = rimeEngine.processKey(keycode, modifiers: modifiers, session: currentSession)
 
+        // 通知翻译调度器用户正在输入：拼音组合期间没有 commit 事件产生，
+        // 但用户并未停顿，应刷新段落超时基准，避免前面已 commit 的数字/字母被丢弃。
+        if rimeEngine.isComposing(session: currentSession) {
+            let preedit = rimeEngine.getPreedit(session: currentSession) ?? ""
+            let preeditCopy = preedit
+            Task { @MainActor in
+                TranslationScheduler.shared.noteTyping(preedit: preeditCopy)
+            }
+        }
+
         // 检查是否有提交文本
         if let commitText = rimeEngine.getCommit(session: currentSession) {
             // 将提交文本发送给客户端
@@ -317,6 +349,21 @@ class LOInputController: IMKInputController {
             let commitTextCopy = commitText
             Task { @MainActor in
                 TranslationScheduler.shared.commit(text: commitTextCopy)
+            }
+        } else if !handled {
+            // Rime 未处理该按键（handled=false），系统会直接把字符插入客户端。
+            // 这种情况发生在中文模式非组合状态下输入数字、英文字母等 ASCII 字符：
+            // Rime 的 express_editor 不消费这些键，字符由系统直接输出，
+            // 但翻译调度器需要感知这些字符才能把它们纳入翻译段落。
+            // 此处主动把可打印字符交给调度器，避免「3」等数字被翻译遗漏。
+            if let chars = event.characters, chars.count == 1,
+               let scalar = chars.unicodeScalars.first,
+               scalar.value >= 0x20 && scalar.value <= 0x7E,
+               !rimeEngine.isComposing(session: currentSession) {
+                let commitTextCopy = chars
+                Task { @MainActor in
+                    TranslationScheduler.shared.commit(text: commitTextCopy)
+                }
             }
         }
 
@@ -390,9 +437,9 @@ class LOInputController: IMKInputController {
     override func menu() -> NSMenu! {
         let menu = NSMenu()
 
-        // 语镜设置
+        // 语境输入法设置
         let settingsItem = NSMenuItem(
-            title: "语镜设置...",
+            title: "语境输入法设置...",
             action: #selector(openSettings),
             keyEquivalent: ","
         )
@@ -403,7 +450,7 @@ class LOInputController: IMKInputController {
 
         // 退出
         let quitItem = NSMenuItem(
-            title: "退出语镜",
+            title: "退出语境输入法",
             action: #selector(quit),
             keyEquivalent: "q"
         )

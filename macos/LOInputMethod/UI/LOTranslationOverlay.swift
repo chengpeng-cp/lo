@@ -2,10 +2,20 @@ import AppKit
 
 // MARK: - 翻译浮窗配置
 
+/// 悬浮窗位置模式
+enum OverlayPositionMode: String {
+    /// 固定在屏幕右侧垂直居中
+    case fixed
+    /// 可自由拖动，位置记忆
+    case draggable
+    /// 跟随输入光标
+    case followCursor
+}
+
 /// 翻译浮窗的配置项
 struct OverlayConfig {
-    /// 是否固定位置（屏幕右侧），否则可拖动
-    var isFixedPosition: Bool = true
+    /// 位置模式
+    var positionMode: OverlayPositionMode = .fixed
 
     /// 自动消失间隔（秒），0 表示不自动消失
     var autoDismissInterval: TimeInterval = 5.0
@@ -56,6 +66,10 @@ class LOTranslationOverlay {
 
     /// 淡出动画
     private var fadeAnimation: NSAnimation?
+
+    /// 光标位置提供者（跟随光标模式使用）
+    /// 由 LOInputController 在 activateServer 时设置，返回当前输入光标的屏幕坐标
+    var cursorPositionProvider: (() -> NSRect?)?
 
     // MARK: - 初始化
 
@@ -109,6 +123,17 @@ class LOTranslationOverlay {
         scheduleDismissTimer()
     }
 
+    /// 显示翻译错误（失败时调用，避免悬浮窗卡在 loading 状态）
+    /// - Parameters:
+    ///   - originalText: 原文
+    ///   - error: 错误信息
+    func showError(originalText: String, error: String) {
+        cancelDismissTimer()
+        overlayView.showError(originalText: originalText, error: error)
+        resizeAndShow()
+        scheduleDismissTimer()
+    }
+
     /// 静默更新原文（防抖期间使用，不闪烁）
     /// - Parameter text: 新的原文
     func silentUpdateOriginal(_ text: String) {
@@ -140,7 +165,7 @@ class LOTranslationOverlay {
 
     /// 应用配置
     private func applyConfig() {
-        panel.isMovableByWindowBackground = !config.isFixedPosition
+        panel.isMovableByWindowBackground = (config.positionMode == .draggable)
         panel.alphaValue = config.opacity
     }
 
@@ -149,11 +174,10 @@ class LOTranslationOverlay {
         let size = overlayView.preferredSize()
         guard size.width > 0 && size.height > 0 else { return }
 
-        // 保存当前位置
         var currentOrigin = panel.frame.origin
 
-        // 如果面板不可见，计算初始位置
-        if !panel.isVisible {
+        // 跟随光标模式：每次更新都重新定位；其他模式仅首次显示时定位
+        if !panel.isVisible || config.positionMode == .followCursor {
             currentOrigin = calculatePosition(size: size)
         }
 
@@ -176,27 +200,80 @@ class LOTranslationOverlay {
         }
         let screenRect = screen.visibleFrame
 
-        if config.isFixedPosition {
+        switch config.positionMode {
+        case .fixed:
             // 固定模式：屏幕右侧垂直居中
             let x = screenRect.maxX - size.width - Layout.screenEdgeMargin
             let y = screenRect.midY - size.height / 2
             return NSPoint(x: x, y: y)
-        } else {
+        case .draggable:
             // 可移动模式：尝试恢复上次保存的位置
             if let saved = loadSavedPosition() {
-                // 确保保存的位置在当前屏幕可见区域内
-                let adjusted = clampToVisibleFrame(
+                return clampToVisibleFrame(
                     origin: saved,
                     size: size,
                     screenRect: screenRect
                 )
-                return adjusted
             }
             // 没有保存位置，默认放在右侧
             let x = screenRect.maxX - size.width - Layout.screenEdgeMargin
             let y = screenRect.midY - size.height / 2
             return NSPoint(x: x, y: y)
+        case .followCursor:
+            // 跟随光标模式：定位到输入光标附近
+            return calculatePositionNearCursor(size: size, screenRect: screenRect)
         }
+    }
+
+    /// 计算光标附近的浮窗位置
+    /// - Parameters:
+    ///   - size: 浮窗尺寸
+    ///   - screenRect: 屏幕可见区域
+    /// - Returns: 浮窗左下角坐标
+    private func calculatePositionNearCursor(size: NSSize, screenRect: NSRect) -> NSPoint {
+        // 优先使用光标位置提供者（通过 IMKTextInput 获取输入光标坐标）
+        if let cursorRect = cursorPositionProvider?(),
+           cursorRect.origin.x != 0 || cursorRect.origin.y != 0 {
+            return positionNearRect(cursorRect, size: size, screenRect: screenRect)
+        }
+
+        // 回退到鼠标位置
+        let mouseLocation = NSEvent.mouseLocation
+        return positionNearRect(
+            NSRect(x: mouseLocation.x, y: mouseLocation.y, width: 0, height: 0),
+            size: size,
+            screenRect: screenRect
+        )
+    }
+
+    /// 将浮窗定位到指定矩形附近（默认在其下方，下方空间不足时放上方）
+    private func positionNearRect(_ rect: NSRect, size: NSSize, screenRect: NSRect) -> NSPoint {
+        /// 光标与浮窗之间的间距
+        let verticalGap: CGFloat = 6
+
+        // 默认放在光标下方
+        var originX = rect.origin.x
+        var originY = rect.origin.y - size.height - verticalGap
+
+        // 水平方向：确保不超出屏幕右侧
+        if originX + size.width > screenRect.maxX {
+            originX = screenRect.maxX - size.width - Layout.screenEdgeMargin
+        }
+        // 水平方向：确保不超出屏幕左侧
+        if originX < screenRect.minX {
+            originX = screenRect.minX + Layout.screenEdgeMargin
+        }
+
+        // 垂直方向：下方空间不足，放到光标上方
+        if originY < screenRect.minY {
+            originY = rect.origin.y + rect.height + verticalGap
+        }
+        // 垂直方向：确保不超出屏幕上方
+        if originY + size.height > screenRect.maxY {
+            originY = screenRect.maxY - size.height - Layout.screenEdgeMargin
+        }
+
+        return NSPoint(x: originX, y: originY)
     }
 
     /// 确保位置在屏幕可见区域内（处理 Dock、菜单栏、刘海）
@@ -258,7 +335,7 @@ class LOTranslationOverlay {
             self.panel.orderOut(nil)
             self.panel.alphaValue = self.config.opacity
             // 可移动模式下保存位置
-            if !self.config.isFixedPosition {
+            if self.config.positionMode == .draggable {
                 self.savePosition(self.panel.frame.origin)
             }
         })

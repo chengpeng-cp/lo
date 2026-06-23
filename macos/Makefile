@@ -49,7 +49,11 @@ install: pre-install build fetch-dict
 	@mkdir -p "$(BUNDLE_PATH)/Contents/Resources/rime"
 	@cp "$(BUILD_DIR)/$(APP_NAME)" "$(BUNDLE_PATH)/Contents/MacOS/$(APP_NAME)"
 	@cp LOInputMethod/Info.plist "$(BUNDLE_PATH)/Contents/Info.plist"
+	@cp LOInputMethod/Resources/AppIcon.icns "$(BUNDLE_PATH)/Contents/Resources/AppIcon.icns"
+	@cp LOInputMethod/Resources/InfoPlist.strings "$(BUNDLE_PATH)/Contents/Resources/InfoPlist.strings"
 	@cp -r LOInputMethod/Resources/rime/* "$(BUNDLE_PATH)/Contents/Resources/rime/"
+	@cp -r LOInputMethod/Resources/zh-Hans.lproj "$(BUNDLE_PATH)/Contents/Resources/"
+	@cp -r LOInputMethod/Resources/en.lproj "$(BUNDLE_PATH)/Contents/Resources/"
 	@# 重新 ad-hoc 签名整个 bundle，封住 Info.plist/Resources（Sealed Resources），
 	@# 并固定签名 Identifier = bundle id，确保 TCC 辅助功能授权稳定不丢失
 	@# （未签名/ad-hoc 仅签二进制时，TCC 无法可靠绑定身份，每次重装授权失效）
@@ -68,7 +72,11 @@ install-full: pre-install build fetch-dict
 	@mkdir -p "$(BUNDLE_PATH)/Contents/Resources/rime"
 	@cp "$(BUILD_DIR)/$(APP_NAME)" "$(BUNDLE_PATH)/Contents/MacOS/$(APP_NAME)"
 	@cp LOInputMethod/Info.plist "$(BUNDLE_PATH)/Contents/Info.plist"
+	@cp LOInputMethod/Resources/AppIcon.icns "$(BUNDLE_PATH)/Contents/Resources/AppIcon.icns"
+	@cp LOInputMethod/Resources/InfoPlist.strings "$(BUNDLE_PATH)/Contents/Resources/InfoPlist.strings"
 	@cp -r LOInputMethod/Resources/rime/* "$(BUNDLE_PATH)/Contents/Resources/rime/"
+	@cp -r LOInputMethod/Resources/zh-Hans.lproj "$(BUNDLE_PATH)/Contents/Resources/"
+	@cp -r LOInputMethod/Resources/en.lproj "$(BUNDLE_PATH)/Contents/Resources/"
 	@bash scripts/build-librime.sh
 	@# 重新 ad-hoc 签名整个 bundle（封住 Info.plist/Resources，固定 Identifier=bundle id），
 	@# 确保 TCC 辅助功能授权稳定（详见 install 目标注释）
@@ -78,7 +86,7 @@ install-full: pre-install build fetch-dict
 	@# 清理用户 Rime 旧构建产物，强制重新编译新词典
 	@rm -f "$(HOME)/Library/Rime/build/luna_pinyin.table.bin" \
 	       "$(HOME)/Library/Rime/build/luna_pinyin.prism.bin" 2>/dev/null || true
-	@echo "安装完成。请在系统设置中添加语镜输入法。"
+	@echo "安装完成。请在系统设置中添加语境输入法。"
 
 ## 重启输入法进程（杀掉后用 open 重新启动，确保驻留）
 restart:

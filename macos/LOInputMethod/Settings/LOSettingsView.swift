@@ -23,6 +23,12 @@ class LOSettingsView: NSView {
     /// 验证按钮
     private var verifyButton: NSButton!
 
+    /// API 密钥行（含标签+输入框+验证按钮），Google 免费方案时隐藏
+    private var apiKeyRow: NSView!
+
+    /// Google 免费方案提示行
+    private var googleFreeHintRow: NSView!
+
     /// 翻译模式下拉框
     private var modePopup: NSPopUpButton!
 
@@ -32,29 +38,32 @@ class LOSettingsView: NSView {
     /// 可拖动单选按钮
     private var movableRadio: NSButton!
 
-    /// 自动消失滑块
-    private var dismissSlider: NSSlider!
+    /// 跟随光标单选按钮
+    private var followCursorRadio: NSButton!
 
-    /// 自动消失标签
-    private var dismissLabel: NSTextField!
+    /// 自动消失数值输入框
+    private var dismissField: NSTextField!
 
-    /// 透明度滑块
-    private var opacitySlider: NSSlider!
+    /// 自动消失步进器（上下箭头）
+    private var dismissStepper: NSStepper!
 
-    /// 透明度标签
-    private var opacityLabel: NSTextField!
+    /// 透明度数值输入框
+    private var opacityField: NSTextField!
 
-    /// 段落断句时间滑块
-    private var segmentPauseSlider: NSSlider!
+    /// 透明度步进器（上下箭头）
+    private var opacityStepper: NSStepper!
 
-    /// 段落断句时间标签
-    private var segmentPauseLabel: NSTextField!
+    /// 段落断句时间数值输入框
+    private var segmentPauseField: NSTextField!
 
-    /// 翻译防抖时间滑块
-    private var debounceSlider: NSSlider!
+    /// 段落断句时间步进器（上下箭头）
+    private var segmentPauseStepper: NSStepper!
 
-    /// 翻译防抖时间标签
-    private var debounceLabel: NSTextField!
+    /// 翻译防抖时间数值输入框
+    private var debounceField: NSTextField!
+
+    /// 翻译防抖时间步进器（上下箭头）
+    private var debounceStepper: NSStepper!
 
     /// 当前设置
     private var settings = LOSettings.load()
@@ -70,8 +79,77 @@ class LOSettingsView: NSView {
     /// 保存按钮引用（用于保存后反馈）
     private weak var saveButtonRef: NSButton?
 
-    /// 滑块数值输入框与对应滑块的映射，用于直接输入数值时同步
-    private var sliderTextFieldInfo: [NSTextField: (slider: NSSlider, multiplier: Double)] = [:]
+    /// 数值行的配置：直接输入或点击上下箭头调整时，统一通过此结构同步 settings 与显示
+    /// 使用 class（引用类型）以便在事件回调里更新 lastRawValue，无需重建字典条目
+    private class NumberRowConfig {
+        weak var field: NSTextField?
+        weak var stepper: NSStepper?
+        let minValue: Double
+        let maxValue: Double
+        /// 步进器每次增减的原始值（用于把累加结果四舍五入到步长倍数，消除浮点漂移）
+        let step: Double
+        /// 显示值 / settings 值的倍数（如透明度显示 85，settings 存 0.85，则 multiplier = 100）
+        let multiplier: Double
+        /// 值格式化串，如 "%.1f 秒" / "%.0f%%"
+        let format: String
+        /// 单位文本（与 format 末尾保持一致，独立显示在输入框后），如 "秒" / "%"
+        let unit: String
+        /// 数值改变时的回调，参数为换算后的 settings 原始值
+        let onChange: (Double) -> Void
+
+        /// 最近一次同步到 field/stepper 的原始值。
+        /// 用于点击箭头时判断方向（上/下），避免 stepper 自身累加状态与 field 未提交编辑不一致。
+        var lastRawValue: Double = 0
+
+        init(field: NSTextField?,
+             stepper: NSStepper?,
+             minValue: Double,
+             maxValue: Double,
+             step: Double,
+             multiplier: Double,
+             format: String,
+             unit: String,
+             onChange: @escaping (Double) -> Void) {
+            self.field = field
+            self.stepper = stepper
+            self.minValue = minValue
+            self.maxValue = maxValue
+            self.step = step
+            self.multiplier = multiplier
+            self.format = format
+            self.unit = unit
+            self.onChange = onChange
+        }
+
+        /// 把原始 settings 值格式化为输入框显示文本（不含 unit，unit 由独立标签展示）
+        func displayString(forRawValue raw: Double) -> String {
+            // format 形如 "%.1f 秒"，单位由独立 unit 标签展示，这里只取数值部分
+            let valueString = String(format: format, raw * multiplier)
+            return Self.stripTrailingUnit(from: valueString)
+        }
+
+        /// 从 "5.0 秒" 这类带单位的显示文本中剥离尾部单位，只保留数值部分
+        private static func stripTrailingUnit(from string: String) -> String {
+            var end = string.startIndex
+            var seenDigit = false
+            for i in string.indices {
+                let c = string[i]
+                if c.isNumber || c == "." || c == "-" {
+                    end = string.index(after: i)
+                    seenDigit = true
+                } else if c == " " && !seenDigit {
+                    // 前导空格跳过
+                    continue
+                } else {
+                    break
+                }
+            }
+            return String(string[..<end]).trimmingCharacters(in: .whitespaces)
+        }
+    }
+
+    /// 数值输入框与对应行配置的映射，便于直接输入或点击步进器时同步
+    private var numberRowConfigs: [NSTextField: NumberRowConfig] = [:]
 
     /// 主垂直栈
     private let mainStack: NSStackView = {
@@ -120,6 +198,7 @@ class LOSettingsView: NSView {
         mainStack.addArrangedSubview(makeProviderRow())
         mainStack.addArrangedSubview(spacer(rowSpacing))
         mainStack.addArrangedSubview(makeAPIKeyRow())
+        mainStack.addArrangedSubview(makeGoogleFreeHintRow())
 
         mainStack.addArrangedSubview(spacer(sectionSpacing))
         mainStack.addArrangedSubview(makeSeparator())
@@ -137,22 +216,28 @@ class LOSettingsView: NSView {
         mainStack.addArrangedSubview(spacer(sectionSpacing))
         mainStack.addArrangedSubview(makeSectionHeader("翻译触发"))
         mainStack.addArrangedSubview(spacer(sectionSpacing))
-        mainStack.addArrangedSubview(makeSliderRow(
+        mainStack.addArrangedSubview(makeNumberRow(
             label: "段落断句：",
-            slider: &segmentPauseSlider,
-            valueLabel: &segmentPauseLabel,
-            minValue: 1, maxValue: 20,
+            field: &segmentPauseField,
+            stepper: &segmentPauseStepper,
+            minValue: 0.1, maxValue: 999999,
+            step: 0.1,
             format: "%.1f 秒",
-            action: #selector(segmentPauseSliderChanged)
+            unit: "秒",
+            action: #selector(segmentPauseChanged),
+            valueMultiplier: 1
         ))
         mainStack.addArrangedSubview(spacer(rowSpacing))
-        mainStack.addArrangedSubview(makeSliderRow(
+        mainStack.addArrangedSubview(makeNumberRow(
             label: "翻译防抖：",
-            slider: &debounceSlider,
-            valueLabel: &debounceLabel,
-            minValue: 0.1, maxValue: 2.0,
+            field: &debounceField,
+            stepper: &debounceStepper,
+            minValue: 0.1, maxValue: 999999,
+            step: 0.1,
             format: "%.1f 秒",
-            action: #selector(debounceSliderChanged)
+            unit: "秒",
+            action: #selector(debounceChanged),
+            valueMultiplier: 1
         ))
 
         mainStack.addArrangedSubview(spacer(sectionSpacing))
@@ -164,22 +249,27 @@ class LOSettingsView: NSView {
         mainStack.addArrangedSubview(spacer(sectionSpacing))
         mainStack.addArrangedSubview(makePositionModeRow())
         mainStack.addArrangedSubview(spacer(rowSpacing))
-        mainStack.addArrangedSubview(makeSliderRow(
+        mainStack.addArrangedSubview(makeNumberRow(
             label: "自动消失：",
-            slider: &dismissSlider,
-            valueLabel: &dismissLabel,
-            minValue: 1, maxValue: 15,
+            field: &dismissField,
+            stepper: &dismissStepper,
+            minValue: 1, maxValue: 9999,
+            step: 0.1,
             format: "%.1f 秒",
-            action: #selector(dismissSliderChanged)
+            unit: "秒",
+            action: #selector(dismissChanged),
+            valueMultiplier: 1
         ))
         mainStack.addArrangedSubview(spacer(rowSpacing))
-        mainStack.addArrangedSubview(makeSliderRow(
+        mainStack.addArrangedSubview(makeNumberRow(
             label: "透明度：",
-            slider: &opacitySlider,
-            valueLabel: &opacityLabel,
+            field: &opacityField,
+            stepper: &opacityStepper,
             minValue: 0.1, maxValue: 1.0,
+            step: 0.01,
             format: "%.0f%%",
-            action: #selector(opacitySliderChanged),
+            unit: "%",
+            action: #selector(opacityChanged),
             valueMultiplier: 100
         ))
 
@@ -290,6 +380,33 @@ class LOSettingsView: NSView {
         row.addArrangedSubview(label)
         row.addArrangedSubview(apiKeyField)
         row.addArrangedSubview(verifyButton)
+        apiKeyRow = row
+        return row
+    }
+
+    /// 构建 Google 免费方案提示行（仅在选择 Google 时显示）
+    private func makeGoogleFreeHintRow() -> NSView {
+        let label = NSTextField(labelWithString: "使用免费网页接口，无需 API Key")
+        label.font = NSFont.systemFont(ofSize: 11)
+        label.textColor = NSColor.secondaryLabelColor
+
+        let prefixLabel = NSTextField(labelWithString: "API 密钥：")
+        prefixLabel.alignment = .right
+        prefixLabel.translatesAutoresizingMaskIntoConstraints = false
+        prefixLabel.setContentHuggingPriority(.required, for: .horizontal)
+        prefixLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        prefixLabel.widthAnchor.constraint(equalToConstant: labelWidth).isActive = true
+
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 6
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
+        row.addArrangedSubview(prefixLabel)
+        row.addArrangedSubview(label)
+
+        googleFreeHintRow = row
         return row
     }
 
@@ -304,6 +421,7 @@ class LOSettingsView: NSView {
     private func makePositionModeRow() -> NSView {
         fixedRadio = NSButton(radioButtonWithTitle: "固定位置", target: self, action: #selector(positionModeChanged))
         movableRadio = NSButton(radioButtonWithTitle: "可自由拖动", target: self, action: #selector(positionModeChanged))
+        followCursorRadio = NSButton(radioButtonWithTitle: "跟随光标", target: self, action: #selector(positionModeChanged))
 
         let label = NSTextField(labelWithString: "位置模式：")
         label.alignment = .right
@@ -316,6 +434,7 @@ class LOSettingsView: NSView {
         radios.spacing = 16
         radios.addArrangedSubview(fixedRadio)
         radios.addArrangedSubview(movableRadio)
+        radios.addArrangedSubview(followCursorRadio)
 
         let row = NSStackView()
         row.orientation = .horizontal
@@ -327,40 +446,80 @@ class LOSettingsView: NSView {
         return row
     }
 
-    private func makeSliderRow(
+    /// 构建数值调整行：label | 数值输入框 | 上下箭头(stepper) | 单位
+    /// 不再使用长滑块，仅保留可输入的数值框 + 步进器 + 单位文本。
+    private func makeNumberRow(
         label text: String,
-        slider: inout NSSlider!,
-        valueLabel: inout NSTextField!,
+        field: inout NSTextField!,
+        stepper: inout NSStepper!,
         minValue: Double,
         maxValue: Double,
+        step: Double,
         format: String,
+        unit: String,
         action: Selector,
         valueMultiplier: Double = 1.0
     ) -> NSView {
-        slider = NSSlider()
-        slider.minValue = minValue
-        slider.maxValue = maxValue
-        slider.target = self
-        slider.action = action
-        slider.translatesAutoresizingMaskIntoConstraints = false
-        slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // 数值输入框（可手动输入）
+        field = NSTextField()
+        field.alignment = .right
+        field.isEditable = true
+        field.isSelectable = true
+        field.drawsBackground = true
+        field.backgroundColor = NSColor.textBackgroundColor
+        field.bezelStyle = .roundedBezel
+        field.target = self
+        field.action = #selector(numberFieldChanged(_:))
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.setContentHuggingPriority(.required, for: .horizontal)
+        field.setContentCompressionResistancePriority(.required, for: .horizontal)
+        field.widthAnchor.constraint(equalToConstant: 55).isActive = true
 
-        valueLabel = NSTextField()
-        valueLabel.alignment = .right
-        valueLabel.isEditable = true
-        valueLabel.isSelectable = true
-        valueLabel.drawsBackground = true
-        valueLabel.backgroundColor = NSColor.textBackgroundColor
-        valueLabel.bezelStyle = .roundedBezel
-        valueLabel.target = self
-        valueLabel.action = #selector(sliderTextFieldChanged(_:))
-        valueLabel.translatesAutoresizingMaskIntoConstraints = false
-        valueLabel.setContentHuggingPriority(.required, for: .horizontal)
-        valueLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        valueLabel.widthAnchor.constraint(equalToConstant: 55).isActive = true
+        // 上下箭头步进器
+        stepper = NSStepper()
+        stepper.minValue = minValue
+        stepper.maxValue = maxValue
+        stepper.increment = step
+        stepper.valueWraps = false
+        stepper.target = self
+        stepper.action = #selector(numberStepperChanged(_:))
+        stepper.translatesAutoresizingMaskIntoConstraints = false
+        stepper.setContentHuggingPriority(.required, for: .horizontal)
+        stepper.widthAnchor.constraint(equalToConstant: 19).isActive = true
+        stepper.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
 
-        // 记录输入框与滑块的映射，便于直接输入时同步
-        sliderTextFieldInfo[valueLabel] = (slider: slider, multiplier: valueMultiplier)
+        // 单位标签（输入框后）
+        let unitLabel = NSTextField(labelWithString: unit)
+        unitLabel.alignment = .left
+        unitLabel.translatesAutoresizingMaskIntoConstraints = false
+        unitLabel.setContentHuggingPriority(.required, for: .horizontal)
+        unitLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // 记录输入框对应的行配置，便于直接输入或点击步进器时同步
+        let onChange: (Double) -> Void
+        switch action {
+        case #selector(dismissChanged):
+            onChange = { [weak self] v in self?.settings.autoDismissInterval = v }
+        case #selector(opacityChanged):
+            onChange = { [weak self] v in self?.settings.overlayOpacity = v }
+        case #selector(segmentPauseChanged):
+            onChange = { [weak self] v in self?.settings.segmentPauseThreshold = v }
+        case #selector(debounceChanged):
+            onChange = { [weak self] v in self?.settings.translationDebounceInterval = v }
+        default:
+            onChange = { _ in }
+        }
+        numberRowConfigs[field] = NumberRowConfig(
+            field: field,
+            stepper: stepper,
+            minValue: minValue,
+            maxValue: maxValue,
+            step: step,
+            multiplier: valueMultiplier,
+            format: format,
+            unit: unit,
+            onChange: onChange
+        )
 
         let label = NSTextField(labelWithString: text)
         label.alignment = .right
@@ -375,10 +534,11 @@ class LOSettingsView: NSView {
         row.spacing = 6
         row.translatesAutoresizingMaskIntoConstraints = false
         row.addArrangedSubview(label)
-        row.addArrangedSubview(slider)
-        row.addArrangedSubview(valueLabel)
+        row.addArrangedSubview(field)
+        row.addArrangedSubview(stepper)
+        row.addArrangedSubview(unitLabel)
 
-        slider.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
+        field.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
         return row
     }
 
@@ -419,29 +579,38 @@ class LOSettingsView: NSView {
         let currentProvider = settings.translationProvider
         apiKeyField.stringValue = settings.getAPIKey(provider: currentProvider) ?? ""
 
+        // 根据提供商切换 API Key 行 / 免费提示行的显示
+        updateAPIKeyRowVisibility()
+
         // 翻译模式
         let modeIndex = TranslationMode.allCases.firstIndex(where: { $0.rawValue == settings.translationMode }) ?? 0
         modePopup.selectItem(at: modeIndex)
 
         // 位置模式
-        fixedRadio.state = settings.overlayFixedPosition ? .on : .off
-        movableRadio.state = settings.overlayFixedPosition ? .off : .on
+        let mode = settings.overlayPositionMode
+        fixedRadio.state = (mode == "fixed") ? .on : .off
+        movableRadio.state = (mode == "draggable") ? .on : .off
+        followCursorRadio.state = (mode == "followCursor") ? .on : .off
 
         // 自动消失
-        dismissSlider.doubleValue = settings.autoDismissInterval
-        dismissLabel.stringValue = String(format: "%.1f 秒", settings.autoDismissInterval)
+        applyRawValue(settings.autoDismissInterval, to: dismissField, stepper: dismissStepper)
 
         // 透明度
-        opacitySlider.doubleValue = settings.overlayOpacity
-        opacityLabel.stringValue = String(format: "%.0f%%", settings.overlayOpacity * 100)
+        applyRawValue(settings.overlayOpacity, to: opacityField, stepper: opacityStepper)
 
         // 段落断句时间
-        segmentPauseSlider.doubleValue = settings.segmentPauseThreshold
-        segmentPauseLabel.stringValue = String(format: "%.1f 秒", settings.segmentPauseThreshold)
+        applyRawValue(settings.segmentPauseThreshold, to: segmentPauseField, stepper: segmentPauseStepper)
 
         // 翻译防抖时间
-        debounceSlider.doubleValue = settings.translationDebounceInterval
-        debounceLabel.stringValue = String(format: "%.1f 秒", settings.translationDebounceInterval)
+        applyRawValue(settings.translationDebounceInterval, to: debounceField, stepper: debounceStepper)
+    }
+
+    /// 把原始 settings 值同步到对应输入框（用 format 格式化显示）与 stepper
+    private func applyRawValue(_ raw: Double, to field: NSTextField?, stepper: NSStepper?) {
+        guard let field = field, let config = numberRowConfigs[field] else { return }
+        field.stringValue = config.displayString(forRawValue: raw)
+        stepper?.doubleValue = raw
+        config.lastRawValue = raw
     }
 
     // MARK: - 控件事件
@@ -450,6 +619,15 @@ class LOSettingsView: NSView {
         let isGoogle = providerPopup.indexOfSelectedItem == 1
         settings.translationProvider = isGoogle ? "google" : "deepseek"
         apiKeyField.stringValue = settings.getAPIKey(provider: settings.translationProvider) ?? ""
+        updateAPIKeyRowVisibility()
+    }
+
+    /// 根据当前翻译提供商切换 API Key 行与免费提示行的显示
+    /// Google 使用免费网页接口，无需 API Key；DeepSeek 需要 API Key
+    private func updateAPIKeyRowVisibility() {
+        let isGoogle = settings.translationProvider == "google"
+        apiKeyRow.isHidden = isGoogle
+        googleFreeHintRow.isHidden = !isGoogle
     }
 
     @objc private func modeChanged() {
@@ -458,19 +636,48 @@ class LOSettingsView: NSView {
     }
 
     @objc private func verifyAPIKey() {
+        let provider = settings.translationProvider
+
+        // Google 使用免费网页接口，无需 API Key，直接测试连接
+        if provider == "google" {
+            verifyButton.isEnabled = false
+            verifyButton.title = "测试中..."
+
+            let mode = TranslationMode(rawValue: settings.translationMode) ?? .fluent
+            let translator = GoogleTranslator()
+
+            Task { [weak self] in
+                do {
+                    _ = try await translator.translate(text: "你好世界", mode: mode)
+                    DispatchQueue.main.async {
+                        self?.verifyButton.isEnabled = true
+                        self?.verifyButton.title = "验证"
+                        self?.showAlert(title: "连接成功", message: "Google 免费翻译接口可用")
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self?.verifyButton.isEnabled = true
+                        self?.verifyButton.title = "验证"
+                        self?.showAlert(title: "连接失败", message: error.localizedDescription)
+                    }
+                }
+            }
+            return
+        }
+
+        // DeepSeek 需要 API Key
         let apiKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !apiKey.isEmpty else {
             showAlert(title: "验证失败", message: "请先输入 API 密钥")
             return
         }
-        settings.setAPIKey(provider: settings.translationProvider, key: apiKey)
+        settings.setAPIKey(provider: provider, key: apiKey)
 
         verifyButton.isEnabled = false
         verifyButton.title = "验证中..."
 
-        let provider = settings.translationProvider
         let mode = TranslationMode(rawValue: settings.translationMode) ?? .fluent
-        let translator: TranslationServiceProtocol = provider == "google" ? GoogleTranslator() : DeepSeekTranslator()
+        let translator: TranslationServiceProtocol = DeepSeekTranslator()
 
         Task { [weak self] in
             do {
@@ -491,48 +698,111 @@ class LOSettingsView: NSView {
     }
 
     @objc private func positionModeChanged() {
-        settings.overlayFixedPosition = fixedRadio.state == .on
-    }
-
-    @objc private func dismissSliderChanged() {
-        let value = dismissSlider.doubleValue
-        settings.autoDismissInterval = value
-        dismissLabel.stringValue = String(format: "%.1f 秒", value)
-    }
-
-    @objc private func opacitySliderChanged() {
-        let value = opacitySlider.doubleValue
-        settings.overlayOpacity = value
-        opacityLabel.stringValue = String(format: "%.0f%%", value * 100)
-    }
-
-    @objc private func segmentPauseSliderChanged() {
-        let value = segmentPauseSlider.doubleValue
-        settings.segmentPauseThreshold = value
-        segmentPauseLabel.stringValue = String(format: "%.1f 秒", value)
-    }
-
-    @objc private func debounceSliderChanged() {
-        let value = debounceSlider.doubleValue
-        settings.translationDebounceInterval = value
-        debounceLabel.stringValue = String(format: "%.1f 秒", value)
-    }
-
-    /// 数值输入框直接编辑后，同步到对应滑块并触发滑块 action 以更新 settings
-    @objc private func sliderTextFieldChanged(_ sender: NSTextField) {
-        guard let info = sliderTextFieldInfo[sender] else { return }
-
-        var value = sender.doubleValue / info.multiplier
-        value = min(max(value, info.slider.minValue), info.slider.maxValue)
-        info.slider.doubleValue = value
-
-        // 触发滑块原有的 action，使 settings 和 label 格式化同步更新
-        if let target = info.slider.target, let action = info.slider.action {
-            NSApp.sendAction(action, to: target, from: info.slider)
+        if fixedRadio.state == .on {
+            settings.overlayPositionMode = "fixed"
+        } else if followCursorRadio.state == .on {
+            settings.overlayPositionMode = "followCursor"
+        } else {
+            settings.overlayPositionMode = "draggable"
         }
     }
 
+    @objc private func dismissChanged() {
+        // 实际同步逻辑在 numberFieldChanged / numberStepperChanged 中统一处理
+        // 这里仅作为配置中的 action 标识（已通过 NumberRowConfig.onChange 回调写回）
+    }
+
+    @objc private func opacityChanged() {
+        // 同上
+    }
+
+    @objc private func segmentPauseChanged() {
+        // 同上
+    }
+
+    @objc private func debounceChanged() {
+        // 同上
+    }
+
+    /// 数值输入框直接编辑后，按行配置 clamp、四舍五入到步长倍数，并同步 stepper 与 settings
+    @objc private func numberFieldChanged(_ sender: NSTextField) {
+        guard let config = numberRowConfigs[sender] else { return }
+        var raw = sender.doubleValue / config.multiplier
+        raw = snapToStep(raw, step: config.step)
+        raw = clampRawValue(raw, minValue: config.minValue, maxValue: config.maxValue)
+        // 用 format 重新格式化显示，消除浮点精度导致的多位小数
+        sender.stringValue = config.displayString(forRawValue: raw)
+        config.stepper?.doubleValue = raw
+        config.lastRawValue = raw
+        config.onChange(raw)
+    }
+
+    /// 点击上下箭头后，把步进器的新值四舍五入到步长倍数，再同步到输入框与 settings
+    /// 关键：用户可能手动改了输入框但未按回车（field editor 持有未提交文本），
+    /// 此时 stepper 的内部累加状态与 field 显示值不一致。这里以 field 当前显示值
+    /// （先提交 field editor）为起点，按 stepper 的方向（新值 vs 上次值）决定增减。
+    @objc private func numberStepperChanged(_ sender: NSStepper) {
+        guard let config = numberRowConfigs.values.first(where: { $0.stepper === sender }),
+              let field = config.field else { return }
+
+        // 1. 若 field 正在编辑，先把 field editor 的未提交文本写回 field.stringValue
+        if let editor = field.currentEditor() {
+            field.stringValue = editor.string
+        }
+
+        // 2. 以 field 当前显示值作为调整起点（覆盖 stepper 自身的累加状态）
+        var raw = field.doubleValue / config.multiplier
+
+        // 3. 根据 stepper 新值与上次同步值的差，判断方向，从 field 当前值起增/减一个步长
+        let stepperDelta = sender.doubleValue - config.lastRawValue
+        if stepperDelta > 0 {
+            raw = raw + config.step
+        } else if stepperDelta < 0 {
+            raw = raw - config.step
+        }
+
+        // 4. 四舍五入到步长倍数 + clamp
+        raw = snapToStep(raw, step: config.step)
+        raw = clampRawValue(raw, minValue: config.minValue, maxValue: config.maxValue)
+
+        // 5. 同步 field / stepper / settings
+        sender.doubleValue = raw
+        field.stringValue = config.displayString(forRawValue: raw)
+        config.lastRawValue = raw
+        config.onChange(raw)
+    }
+
+    /// 将原始 settings 值限制在 [min, max] 区间
+    private func clampRawValue(_ value: Double, minValue: Double, maxValue: Double) -> Double {
+        return min(max(value, minValue), maxValue)
+    }
+
+    /// 把值四舍五入到最近的步长倍数，消除浮点累加漂移（如 0.1+0.1+0.1 -> 0.3）
+    private func snapToStep(_ value: Double, step: Double) -> Double {
+        guard step > 0 else { return value }
+        return (value / step).rounded() * step
+    }
+
     @objc private func saveSettings() {
+        // 强制提交所有正在编辑的输入框，确保用户输入的最新值被保存
+        // 修复：用户在数值输入框输入值后未按回车/点击步进器，直接点保存时，
+        // field editor 持有未提交文本，settings 仍为旧值，导致输入未被保存
+        if let editor = apiKeyField.currentEditor() {
+            apiKeyField.stringValue = editor.string
+        }
+        for (field, config) in numberRowConfigs {
+            if let editor = field.currentEditor() {
+                field.stringValue = editor.string
+            }
+            var raw = field.doubleValue / config.multiplier
+            raw = snapToStep(raw, step: config.step)
+            raw = clampRawValue(raw, minValue: config.minValue, maxValue: config.maxValue)
+            field.stringValue = config.displayString(forRawValue: raw)
+            config.stepper?.doubleValue = raw
+            config.lastRawValue = raw
+            config.onChange(raw)
+        }
+
         let apiKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if !apiKey.isEmpty {
             settings.setAPIKey(provider: settings.translationProvider, key: apiKey)
