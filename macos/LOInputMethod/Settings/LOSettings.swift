@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Security
 
@@ -29,7 +30,10 @@ struct LOSettings {
         return OverlayConfig(
             positionMode: OverlayPositionMode(rawValue: overlayPositionMode) ?? .draggable,
             autoDismissInterval: autoDismissInterval,
-            opacity: CGFloat(overlayOpacity)
+            opacity: CGFloat(overlayOpacity),
+            backgroundColor: NSColor(hex: overlayBackgroundColor) ?? NSColor(white: 0.12, alpha: 1.0),
+            originalTextColor: NSColor(hex: overlayOriginalTextColor) ?? NSColor(white: 0.6, alpha: 1.0),
+            translationTextColor: NSColor(hex: overlayTranslationTextColor) ?? NSColor.white
         )
     }
 
@@ -41,6 +45,15 @@ struct LOSettings {
 
     /// 悬浮窗透明度（0.0 ~ 1.0）
     var overlayOpacity: Double = 0.85
+
+    /// 悬浮窗背景颜色（hex 格式，如 "1E1E1E"）
+    var overlayBackgroundColor: String = "1E1E1E"
+
+    /// 待翻译文字颜色（hex 格式）
+    var overlayOriginalTextColor: String = "999999"
+
+    /// 翻译文字颜色（hex 格式）
+    var overlayTranslationTextColor: String = "FFFFFF"
 
     /// 段落断句时间（秒）：超过该时间无新输入，下次提交将开启新段落
     var segmentPauseThreshold: Double = 5.0
@@ -71,6 +84,9 @@ struct LOSettings {
         static let overlayPositionY = "LO_overlayPositionY"
         static let autoDismissInterval = "LO_autoDismissInterval"
         static let overlayOpacity = "LO_overlayOpacity"
+        static let overlayBackgroundColor = "LO_overlayBackgroundColor"
+        static let overlayOriginalTextColor = "LO_overlayOriginalTextColor"
+        static let overlayTranslationTextColor = "LO_overlayTranslationTextColor"
         static let segmentPauseThreshold = "LO_segmentPauseThreshold"
         static let translationDebounceInterval = "LO_translationDebounceInterval"
         static let defaultInputMode = "LO_defaultInputMode"
@@ -109,6 +125,9 @@ struct LOSettings {
         if settings.autoDismissInterval == 0 { settings.autoDismissInterval = 5.0 }
         settings.overlayOpacity = defaults.double(forKey: Keys.overlayOpacity)
         if settings.overlayOpacity == 0 { settings.overlayOpacity = 0.85 }
+        settings.overlayBackgroundColor = defaults.string(forKey: Keys.overlayBackgroundColor) ?? "1E1E1E"
+        settings.overlayOriginalTextColor = defaults.string(forKey: Keys.overlayOriginalTextColor) ?? "999999"
+        settings.overlayTranslationTextColor = defaults.string(forKey: Keys.overlayTranslationTextColor) ?? "FFFFFF"
         settings.segmentPauseThreshold = defaults.double(forKey: Keys.segmentPauseThreshold)
         if settings.segmentPauseThreshold == 0 { settings.segmentPauseThreshold = 5.0 }
         settings.translationDebounceInterval = defaults.double(forKey: Keys.translationDebounceInterval)
@@ -136,6 +155,9 @@ struct LOSettings {
         defaults.set(Double(overlayPosition.y), forKey: Keys.overlayPositionY)
         defaults.set(autoDismissInterval, forKey: Keys.autoDismissInterval)
         defaults.set(overlayOpacity, forKey: Keys.overlayOpacity)
+        defaults.set(overlayBackgroundColor, forKey: Keys.overlayBackgroundColor)
+        defaults.set(overlayOriginalTextColor, forKey: Keys.overlayOriginalTextColor)
+        defaults.set(overlayTranslationTextColor, forKey: Keys.overlayTranslationTextColor)
         defaults.set(segmentPauseThreshold, forKey: Keys.segmentPauseThreshold)
         defaults.set(translationDebounceInterval, forKey: Keys.translationDebounceInterval)
         defaults.set(defaultInputMode, forKey: Keys.defaultInputMode)

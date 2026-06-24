@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 基本信息 -->
+    <key>CFBundleIdentifier</key>
+    <string>com.lo.inputmethod.installer</string>
+
+    <key>CFBundleExecutable</key>
+    <string>LOInstaller</string>
+
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
+    <key>CFBundleName</key>
+    <string>语境输入法安装器</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>语境输入法安装器</string>
+
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh_CN</string>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+
+    <key>LSHasLocalizedDisplayName</key>
+    <true/>
+
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- 安装器是普通前台 App，需显示在 Dock 与菜单栏 -->
+    <key>LSUIElement</key>
+    <false/>
+</dict>
+</plist>
