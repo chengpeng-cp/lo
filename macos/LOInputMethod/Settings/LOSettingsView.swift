@@ -80,6 +80,15 @@ class LOSettingsView: NSView {
     /// 翻译防抖时间步进器（上下箭头）
     private var debounceStepper: NSStepper!
 
+    /// 背景颜色选择器
+    private var backgroundColorWell: NSColorWell!
+
+    /// 待翻译文字颜色选择器
+    private var originalTextColorWell: NSColorWell!
+
+    /// 翻译文字颜色选择器
+    private var translationTextColorWell: NSColorWell!
+
     /// 当前设置
     private var settings = LOSettings.load()
 
@@ -330,6 +339,24 @@ class LOSettingsView: NSView {
             unit: "%",
             action: #selector(opacityChanged),
             valueMultiplier: 100
+        ))
+        mainStack.addArrangedSubview(spacer(rowSpacing))
+        mainStack.addArrangedSubview(makeColorRow(
+            label: "背景颜色：",
+            well: &backgroundColorWell,
+            action: #selector(backgroundColorChanged)
+        ))
+        mainStack.addArrangedSubview(spacer(rowSpacing))
+        mainStack.addArrangedSubview(makeColorRow(
+            label: "原文颜色：",
+            well: &originalTextColorWell,
+            action: #selector(originalTextColorChanged)
+        ))
+        mainStack.addArrangedSubview(spacer(rowSpacing))
+        mainStack.addArrangedSubview(makeColorRow(
+            label: "译文颜色：",
+            well: &translationTextColorWell,
+            action: #selector(translationTextColorChanged)
         ))
 
         // === 底部按钮 ===
@@ -663,6 +690,24 @@ class LOSettingsView: NSView {
         return row
     }
 
+    /// 构建颜色选择行：label | NSColorWell
+    private func makeColorRow(
+        label text: String,
+        well: inout NSColorWell!,
+        action: Selector
+    ) -> NSView {
+        well = NSColorWell()
+        well.target = self
+        well.action = action
+        well.translatesAutoresizingMaskIntoConstraints = false
+        well.setContentHuggingPriority(.required, for: .horizontal)
+        well.setContentCompressionResistancePriority(.required, for: .horizontal)
+        well.widthAnchor.constraint(equalToConstant: 45).isActive = true
+        well.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
+
+        return makeRow(label: text, control: well)
+    }
+
     private func makeBottomButtons() -> NSView {
         let saveButton = NSButton()
         saveButton.title = "保存"
@@ -726,6 +771,11 @@ class LOSettingsView: NSView {
 
         // 透明度
         applyRawValue(settings.overlayOpacity, to: opacityField, stepper: opacityStepper)
+
+        // 颜色
+        backgroundColorWell.color = NSColor(hex: settings.overlayBackgroundColor) ?? NSColor(white: 0.12, alpha: 1.0)
+        originalTextColorWell.color = NSColor(hex: settings.overlayOriginalTextColor) ?? NSColor(white: 0.6, alpha: 1.0)
+        translationTextColorWell.color = NSColor(hex: settings.overlayTranslationTextColor) ?? NSColor.white
 
         // 段落断句时间
         applyRawValue(settings.segmentPauseThreshold, to: segmentPauseField, stepper: segmentPauseStepper)
@@ -920,6 +970,18 @@ class LOSettingsView: NSView {
 
     @objc private func debounceChanged() {
         // 同上
+    }
+
+    @objc private func backgroundColorChanged() {
+        settings.overlayBackgroundColor = backgroundColorWell.color.hexString
+    }
+
+    @objc private func originalTextColorChanged() {
+        settings.overlayOriginalTextColor = originalTextColorWell.color.hexString
+    }
+
+    @objc private func translationTextColorChanged() {
+        settings.overlayTranslationTextColor = translationTextColorWell.color.hexString
     }
 
     /// 数值输入框直接编辑后，按行配置 clamp、四舍五入到步长倍数，并同步 stepper 与 settings

@@ -1,5 +1,33 @@
 import AppKit
 
+// MARK: - NSColor Hex 扩展
+
+extension NSColor {
+    /// 从 hex 字符串创建 NSColor（支持 "FFFFFF" 或 "#FFFFFF" 格式，RGB 6 位）
+    convenience init?(hex: String) {
+        var hexString = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if hexString.hasPrefix("#") {
+            hexString.removeFirst()
+        }
+        guard hexString.count == 6 else { return nil }
+        var rgb: UInt64 = 0
+        Scanner(string: hexString).scanHexInt64(&rgb)
+        let r = CGFloat((rgb & 0xFF0000) >> 16) / 255.0
+        let g = CGFloat((rgb & 0x00FF00) >> 8) / 255.0
+        let b = CGFloat(rgb & 0x0000FF) / 255.0
+        self.init(red: r, green: g, blue: b, alpha: 1.0)
+    }
+
+    /// 转换为 hex 字符串（如 "FFFFFF"，不含 #）
+    var hexString: String {
+        guard let rgbColor = self.usingColorSpace(.sRGB) else { return "FFFFFF" }
+        let r = Int(round(rgbColor.redComponent * 255))
+        let g = Int(round(rgbColor.greenComponent * 255))
+        let b = Int(round(rgbColor.blueComponent * 255))
+        return String(format: "%02X%02X%02X", r, g, b)
+    }
+}
+
 // MARK: - 翻译浮窗配置
 
 /// 悬浮窗位置模式
@@ -22,6 +50,15 @@ struct OverlayConfig {
 
     /// 窗口不透明度 (0.0 ~ 1.0)
     var opacity: CGFloat = 0.95
+
+    /// 背景颜色
+    var backgroundColor: NSColor = NSColor(white: 0.12, alpha: 1.0)
+
+    /// 待翻译文字颜色
+    var originalTextColor: NSColor = NSColor(white: 0.6, alpha: 1.0)
+
+    /// 翻译文字颜色
+    var translationTextColor: NSColor = NSColor.white
 }
 
 // MARK: - 翻译浮窗
@@ -167,6 +204,11 @@ class LOTranslationOverlay {
     private func applyConfig() {
         panel.isMovableByWindowBackground = (config.positionMode == .draggable)
         panel.alphaValue = config.opacity
+        overlayView.updateColors(
+            backgroundColor: config.backgroundColor,
+            originalTextColor: config.originalTextColor,
+            translationTextColor: config.translationTextColor
+        )
     }
 
     /// 调整尺寸并显示

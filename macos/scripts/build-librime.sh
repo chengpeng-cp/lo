@@ -6,7 +6,8 @@ set -uo pipefail
 
 # 配置
 APP_NAME="LOInputMethod"
-INSTALL_DIR="${HOME}/Library/Input Methods/${APP_NAME}.app"
+# 允许外部通过 INSTALL_DIR 环境变量覆盖目标 .app 路径（用于打包 staging payload）
+INSTALL_DIR="${INSTALL_DIR:-${HOME}/Library/Input Methods/${APP_NAME}.app}"
 FRAMEWORKS_DIR="${INSTALL_DIR}/Contents/Frameworks"
 BUILD_DIR=".build/release"
 

@@ -10,14 +10,16 @@ class LOTranslationOverlayView: NSView {
 
     // MARK: - 常量
 
-    /// 深色主题配色
+    /// 状态色（不可自定义，固定用于加载/错误状态）
     private enum Theme {
-        static let backgroundColor = NSColor(white: 0.12, alpha: 0.92)
-        static let originalTextColor = NSColor(white: 0.6, alpha: 1.0)
-        static let translationTextColor = NSColor.white
         static let loadingTextColor = NSColor(white: 0.5, alpha: 1.0)
         static let errorTextColor = NSColor(calibratedRed: 0.95, green: 0.55, blue: 0.55, alpha: 1.0)
     }
+
+    /// 可配置的颜色（由设置驱动）
+    private var backgroundColor: NSColor = NSColor(white: 0.12, alpha: 1.0)
+    private var originalTextColor: NSColor = NSColor(white: 0.6, alpha: 1.0)
+    private var translationTextColor: NSColor = NSColor.white
 
     /// 布局间距
     private enum Layout {
@@ -61,7 +63,7 @@ class LOTranslationOverlayView: NSView {
         // 创建原文标签
         originalLabel = NSTextField(labelWithString: "")
         originalLabel.font = NSFont.systemFont(ofSize: Layout.fontSize, weight: .regular)
-        originalLabel.textColor = Theme.originalTextColor
+        originalLabel.textColor = originalTextColor
         originalLabel.lineBreakMode = .byWordWrapping
         originalLabel.maximumNumberOfLines = 0
         originalLabel.isSelectable = false
@@ -74,7 +76,7 @@ class LOTranslationOverlayView: NSView {
         // 创建翻译文本视图（可滚动、可换行、不截断）
         translationTextView = NSTextView()
         translationTextView.font = NSFont.systemFont(ofSize: Layout.fontSize, weight: .medium)
-        translationTextView.textColor = Theme.translationTextColor
+        translationTextView.textColor = translationTextColor
         translationTextView.backgroundColor = .clear
         translationTextView.isEditable = false
         translationTextView.isSelectable = true
@@ -116,7 +118,7 @@ class LOTranslationOverlayView: NSView {
         copyButton.bezelStyle = .inline
         copyButton.isBordered = false
         copyButton.imagePosition = .imageOnly
-        copyButton.contentTintColor = Theme.originalTextColor
+        copyButton.contentTintColor = originalTextColor
         copyButton.imageScaling = .scaleProportionallyDown
         copyButton.toolTip = "复制翻译内容"
 
@@ -186,12 +188,34 @@ class LOTranslationOverlayView: NSView {
     // MARK: - 绘制背景
 
     override func draw(_ dirtyRect: NSRect) {
-        Theme.backgroundColor.setFill()
+        backgroundColor.setFill()
         let path = NSBezierPath(roundedRect: bounds, xRadius: Layout.cornerRadius, yRadius: Layout.cornerRadius)
         path.fill()
     }
 
     // MARK: - 公开方法
+
+    /// 更新颜色配置（由 LOTranslationOverlay.applyConfig 调用）
+    func updateColors(
+        backgroundColor: NSColor,
+        originalTextColor: NSColor,
+        translationTextColor: NSColor
+    ) {
+        self.backgroundColor = backgroundColor
+        self.originalTextColor = originalTextColor
+        self.translationTextColor = translationTextColor
+
+        // 原文标签与复制按钮颜色始终更新
+        originalLabel.textColor = originalTextColor
+        copyButton.contentTintColor = originalTextColor
+
+        // 翻译文本颜色：仅在显示有效翻译时更新（loading/error 状态保持原色）
+        if !isLoading && hasValidTranslation {
+            translationTextView.textColor = translationTextColor
+        }
+
+        needsDisplay = true
+    }
 
     /// 显示加载状态
     /// - Parameter originalText: 原文
@@ -213,7 +237,7 @@ class LOTranslationOverlayView: NSView {
         hasValidTranslation = true
         originalLabel.stringValue = original
         setTranslationText(translation)
-        translationTextView.textColor = Theme.translationTextColor
+        translationTextView.textColor = translationTextColor
         needsDisplay = true
     }
 
@@ -241,7 +265,7 @@ class LOTranslationOverlayView: NSView {
         isLoading = false
         hasValidTranslation = true
         setTranslationText(text)
-        translationTextView.textColor = Theme.translationTextColor
+        translationTextView.textColor = translationTextColor
         needsDisplay = true
     }
 
@@ -337,7 +361,7 @@ class LOTranslationOverlayView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self else { return }
             self.copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "复制翻译内容")?.withSymbolConfiguration(symbolConfig)
-            self.copyButton.contentTintColor = Theme.originalTextColor
+            self.copyButton.contentTintColor = self.originalTextColor
         }
     }
 }
