@@ -2,8 +2,8 @@ import AppKit
 
 // MARK: - 设置窗口控制器
 
-/// 语镜设置窗口控制器
-/// 管理"语镜设置"窗口的生命周期和交互
+/// 语境设置窗口控制器
+/// 管理"语境设置"窗口的生命周期和交互
 class LOSettingsWindow: NSWindowController {
 
     /// 单例，确保只有一个设置窗口
@@ -12,54 +12,41 @@ class LOSettingsWindow: NSWindowController {
     /// 设置视图
     private var settingsView: LOSettingsView!
 
-    /// 滚动视图
-    private var scrollView: NSScrollView!
-
     // MARK: - 初始化
 
     private init() {
-        // 创建窗口
+        // 创建窗口（固定内容尺寸，避免被内容撑大）
+        let windowSize = NSSize(width: 780, height: 520)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 560),
+            contentRect: NSRect(origin: .zero, size: windowSize),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         window.title = "语境输入法设置"
         window.isReleasedWhenClosed = false
+        // 固定窗口内容尺寸：不允许用户或内容改变窗口大小
+        window.contentMinSize = windowSize
+        window.contentMaxSize = windowSize
         window.center()
 
         super.init(window: window)
 
-        // 创建滚动视图（内容超过窗口高度时自动滚动）
-        let contentSize = window.contentRect(forFrameRect: window.frame).size
-        scrollView = NSScrollView(frame: NSRect(origin: .zero, size: contentSize))
-        scrollView.hasVerticalScroller = true
-        scrollView.autoresizingMask = [.width, .height]
-        scrollView.borderType = .noBorder
-        // 自动布局：滚动视图钉到窗口内容四边
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        window.contentView = scrollView
+        // 监听窗口关闭事件，确保关闭时保存所有未提交的编辑
+        window.delegate = self
 
-        // 创建设置视图（Auto Layout，高度由内容撑开）
+        // 创建设置视图（内部已包含左侧 tab 导航与右侧滚动内容区）
+        let contentSize = window.contentRect(forFrameRect: window.frame).size
         settingsView = LOSettingsView(frame: NSRect(origin: .zero, size: contentSize))
         settingsView.translatesAutoresizingMaskIntoConstraints = false
+        window.contentView = settingsView
 
-        scrollView.documentView = settingsView
-
-        // 约束设置视图：宽度跟随 clipView（避免水平滚动），上下贴合
-        let clipView = scrollView.contentView
+        // 设置视图钉到窗口内容四边
         NSLayoutConstraint.activate([
-            settingsView.topAnchor.constraint(equalTo: clipView.topAnchor),
-            settingsView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
-            settingsView.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
-            // 约束 bottom，让内容自然撑高；clipView 会处理滚动
-            settingsView.bottomAnchor.constraint(lessThanOrEqualTo: clipView.bottomAnchor),
-            // 宽度等于 clipView 宽度，防止水平滚动条出现
-            settingsView.widthAnchor.constraint(equalTo: clipView.widthAnchor),
-            // 最小高度兜底：即便内容尚未布局完成，documentView 也至少有窗口内容高度，
-            // 避免 Auto Layout 在小屏上把高度塌缩为 0 导致内容不可见
-            settingsView.heightAnchor.constraint(greaterThanOrEqualToConstant: 480),
+            settingsView.topAnchor.constraint(equalTo: window.contentView!.topAnchor),
+            settingsView.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor),
+            settingsView.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor),
+            settingsView.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor),
         ])
     }
 
@@ -94,21 +81,6 @@ class LOSettingsWindow: NSWindowController {
         if !window.isKeyWindow {
             window.orderFrontRegardless()
         }
-
-        // 5. 滚动到顶部，确保「语境设置」首屏可见
-        //    AppKit 坐标系原点在左下角，documentView 顶部 = y 最大处。
-        //    layoutSubtreeIfNeeded 后 bounds 已是真实内容高度，坐标可信。
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self, let window = self.window else { return }
-            window.contentView?.layoutSubtreeIfNeeded()
-            // 滚动到 documentView 顶部：构造顶部 1pt 矩形
-            let docHeight = self.settingsView.bounds.height
-            let topRect = NSRect(
-                origin: NSPoint(x: 0, y: max(docHeight - 1, 0)),
-                size: NSSize(width: self.settingsView.bounds.width, height: 1)
-            )
-            self.scrollView.contentView.scrollToVisible(topRect)
-        }
     }
 
     /// 将窗口在「当前鼠标所在屏」的 visibleFrame 内居中
@@ -130,5 +102,15 @@ class LOSettingsWindow: NSWindowController {
             y: screenRect.midY - windowSize.height / 2
         )
         window.setFrameOrigin(origin)
+    }
+}
+
+// MARK: - NSWindowDelegate
+
+extension LOSettingsWindow: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        // 窗口关闭时提交所有未保存的编辑并保存设置，
+        // 确保用户在输入框中填写但未按回车/未切换焦点的内容不会丢失
+        settingsView.commitAndSave()
     }
 }

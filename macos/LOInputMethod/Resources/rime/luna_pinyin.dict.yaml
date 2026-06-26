@@ -1,7 +1,7 @@
 # Rime dictionary
 # encoding: utf-8
 #
-# 语镜拼音词典（聚合 rime-ice 雾凇拼音社区词库）
+# 语境拼音词典（聚合 rime-ice 雾凇拼音社区词库）
 #
 # 本文件只作为词典入口，通过 import_tables 聚合 rime-ice 的子词典。
 # 子词典文件（cn_dicts/*.dict.yaml）由 scripts/fetch-dict.sh 按需下载，

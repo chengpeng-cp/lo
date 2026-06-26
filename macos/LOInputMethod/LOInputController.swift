@@ -35,7 +35,7 @@ func debugLog(_ message: String) {
 
 // MARK: - 输入控制器
 
-/// 语镜输入法控制器，处理按键输入和候选词显示
+/// 语境输入法控制器，处理按键输入和候选词显示
 @objc(LOInputController)
 class LOInputController: IMKInputController {
 
@@ -103,6 +103,10 @@ class LOInputController: IMKInputController {
             translationScheduler.onTranslationStart = { [weak self] text in
                 self?.translationOverlay.showLoading(originalText: text)
             }
+            // 流式增量：逐步更新译文（原文已在 loading 时设置，保持不变）
+            translationScheduler.onTranslationDelta = { [weak self] _, translation in
+                self?.translationOverlay.updateTranslation(translation)
+            }
             // 翻译完成：更新译文
             translationScheduler.onTranslationReady = { [weak self] original, translation in
                 self?.translationOverlay.show(originalText: original, translation: translation)
@@ -145,7 +149,7 @@ class LOInputController: IMKInputController {
             debugLog("commitRawPreedit: 未在组合输入状态")
             return
         }
-        guard let textInput = client() as? IMKTextInput else {
+        guard let textInput = client() else {
             debugLog("commitRawPreedit: client 无法转换为 IMKTextInput")
             return
         }
@@ -173,7 +177,7 @@ class LOInputController: IMKInputController {
         // 设置光标位置提供者，供翻译浮窗跟随光标模式定位使用
         LOTranslationOverlay.shared.cursorPositionProvider = { [weak self] in
             guard let self = self,
-                  let client = self.client() as? IMKTextInput else { return nil }
+                  let client = self.client() else { return nil }
             var rect = NSRect.zero
             _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
             return rect
@@ -271,12 +275,27 @@ class LOInputController: IMKInputController {
             return false
         }
 
+        // 快捷复制翻译内容：Control+Command+逗号（⌃⌘,）
+        // 在 Command 放行逻辑之前拦截，确保不被放行给系统
+        if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.control) {
+            if event.characters == "," || event.charactersIgnoringModifiers == "," {
+                if LOTranslationOverlay.shared.copyLastTranslation() {
+                    // 若正在组合输入，先清除预编辑文本
+                    if rimeEngine.isComposing(session: currentSession) {
+                        _ = rimeEngine.commitComposition(session: currentSession)
+                        updateUI(client: client)
+                    }
+                    return true
+                }
+            }
+        }
+
         // Command 组合键（Cmd+V 粘贴、Cmd+C 复制、Cmd+X 剪切、Cmd+A 全选等）
         // 不交给 Rime 处理，直接放行让系统/客户端处理，否则粘贴等功能会失效。
         if event.modifierFlags.contains(.command) {
             // 若正在组合输入，先清除预编辑文本，避免干扰客户端的命令操作
             if rimeEngine.isComposing(session: currentSession) {
-                rimeEngine.commitComposition(session: currentSession)
+                _ = rimeEngine.commitComposition(session: currentSession)
                 updateUI(client: client)
             }
             return false
@@ -290,10 +309,10 @@ class LOInputController: IMKInputController {
         if rimeEngine.isComposing(session: currentSession) && candidateWindow.isVisible {
             switch event.keyCode {
             case 124: // → 下一个候选
-                candidateWindow.navigateByArrow(forward: true)
+                _ = candidateWindow.navigateByArrow(forward: true)
                 return true
             case 123: // ← 上一个候选
-                candidateWindow.navigateByArrow(forward: false)
+                _ = candidateWindow.navigateByArrow(forward: false)
                 return true
             case 125: // ↓ 向后翻页
                 handlePageChange(backward: false)
