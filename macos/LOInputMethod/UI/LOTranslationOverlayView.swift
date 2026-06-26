@@ -30,14 +30,9 @@ class LOTranslationOverlayView: NSView {
         static let padding: CGFloat = 16
         static let labelSpacing: CGFloat = 6
         static let sectionSpacing: CGFloat = 12
-        static let textFontSize: CGFloat = 14
         static let titleFontSize: CGFloat = 11
         static let cornerRadius: CGFloat = 12
-        static let maxWidth: CGFloat = 360
         static let copyButtonSize: CGFloat = 18
-
-        /// 翻译区最大高度（约 9 行），超过此高度后启用滚动
-        static let translationMaxHeight: CGFloat = 200
 
         /// 翻译区最小高度（避免内容很少时过窄）
         static let translationMinHeight: CGFloat = 20
@@ -45,6 +40,26 @@ class LOTranslationOverlayView: NSView {
         /// 内容区最小宽度（避免内容很短时窗口过窄）
         static let minContentWidth: CGFloat = 120
     }
+
+    // MARK: - 可配置属性（由设置驱动）
+
+    /// 最大宽度
+    private var maxWidth: CGFloat = 360
+
+    /// 翻译区最大高度（超过此高度后启用滚动）
+    private var maxHeight: CGFloat = 200
+
+    /// 原文字体大小
+    private var originalFontSize: CGFloat = 14
+
+    /// 翻译字体大小
+    private var translationFontSize: CGFloat = 14
+
+    /// 是否显示原文标签
+    private var showOriginalLabel: Bool = true
+
+    /// 是否显示翻译标签
+    private var showTranslationLabel: Bool = true
 
     // MARK: - 属性
 
@@ -78,6 +93,15 @@ class LOTranslationOverlayView: NSView {
     /// 标记下次布局完成后需要滚动到底部
     private var needsScrollToBottom = false
 
+    /// 鼠标是否在悬浮窗内（控制复制按钮显隐）
+    private var isHovering = false
+
+    /// 悬停追踪区域
+    private var hoverTrackingArea: NSTrackingArea?
+
+    /// 是否开启穿透模式（开启后非按钮区域鼠标事件穿透到后方窗口）
+    var clickThrough: Bool = false
+
     // MARK: - 初始化
 
     override init(frame frameRect: NSRect) {
@@ -86,7 +110,7 @@ class LOTranslationOverlayView: NSView {
 
         // 创建原文标签
         originalLabel = NSTextField(labelWithString: "")
-        originalLabel.font = NSFont.systemFont(ofSize: Layout.textFontSize, weight: .regular)
+        originalLabel.font = NSFont.systemFont(ofSize: originalFontSize, weight: .regular)
         originalLabel.textColor = originalTextColor
         originalLabel.lineBreakMode = .byWordWrapping
         originalLabel.maximumNumberOfLines = 0
@@ -107,7 +131,7 @@ class LOTranslationOverlayView: NSView {
 
         // 创建翻译文本视图（可滚动、可换行、不截断）
         translationTextView = NSTextView()
-        translationTextView.font = NSFont.systemFont(ofSize: Layout.textFontSize, weight: .medium)
+        translationTextView.font = NSFont.systemFont(ofSize: translationFontSize, weight: .medium)
         translationTextView.textColor = translationTextColor
         translationTextView.backgroundColor = .clear
         translationTextView.isEditable = false
@@ -189,6 +213,44 @@ class LOTranslationOverlayView: NSView {
         // 配置复制按钮
         copyButton.target = self
         copyButton.action = #selector(copyTranslation)
+        // 默认隐藏，鼠标悬停时显示
+        copyButton.isHidden = true
+    }
+
+    // MARK: - 悬停追踪
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        // 移除旧的追踪区域
+        if let existing = hoverTrackingArea {
+            removeTrackingArea(existing)
+        }
+
+        // 添加新的追踪区域覆盖整个视图
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        hoverTrackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateCopyButtonVisibility()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateCopyButtonVisibility()
+    }
+
+    /// 根据悬停状态和是否有有效翻译更新复制按钮显隐
+    private func updateCopyButtonVisibility() {
+        copyButton.isHidden = !(isHovering && hasValidTranslation)
     }
 
     /// 创建统一的小标题标签
@@ -213,17 +275,57 @@ class LOTranslationOverlayView: NSView {
         path.fill()
     }
 
+    /// 穿透模式下，只有复制按钮区域响应鼠标事件，其余区域返回 nil 让事件穿透到后方窗口
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard clickThrough else {
+            return super.hitTest(point)
+        }
+        // 只让复制按钮（及其子视图）响应点击
+        let hitView = super.hitTest(point)
+        if hitView === copyButton || hitView == copyButton {
+            return hitView
+        }
+        return nil
+    }
+
     // MARK: - 公开方法
 
-    /// 更新颜色配置（由 LOTranslationOverlay.applyConfig 调用）
-    func updateColors(
-        backgroundColor: NSColor,
-        originalTextColor: NSColor,
-        translationTextColor: NSColor
-    ) {
-        self.backgroundColor = backgroundColor
-        self.originalTextColor = originalTextColor
-        self.translationTextColor = translationTextColor
+    /// 更新完整配置（由 LOTranslationOverlay.applyConfig 调用）
+    func updateConfig(_ config: OverlayConfig) {
+        // 更新可配置属性
+        self.maxWidth = config.maxWidth
+        self.maxHeight = config.maxHeight
+        self.originalFontSize = config.originalFontSize
+        self.translationFontSize = config.translationFontSize
+        self.showOriginalLabel = config.showOriginalLabel
+        self.showTranslationLabel = config.showTranslationLabel
+        self.clickThrough = config.clickThrough
+
+        // 主题解析：auto 模式下根据系统外观选择预设颜色
+        var resolvedBg = config.backgroundColor
+        var resolvedOriginal = config.originalTextColor
+        var resolvedTranslation = config.translationTextColor
+        if config.theme == "auto" {
+            let isDark = NSAppearance.current.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let preset = isDark
+                ? LOSettings.darkThemeColors
+                : LOSettings.lightThemeColors
+            resolvedBg = NSColor(hex: preset.bg) ?? resolvedBg
+            resolvedOriginal = NSColor(hex: preset.original) ?? resolvedOriginal
+            resolvedTranslation = NSColor(hex: preset.translation) ?? resolvedTranslation
+        }
+
+        self.backgroundColor = resolvedBg
+        self.originalTextColor = resolvedOriginal
+        self.translationTextColor = resolvedTranslation
+
+        // 更新字体大小
+        originalLabel.font = NSFont.systemFont(ofSize: originalFontSize, weight: .regular)
+        translationTextView.font = NSFont.systemFont(ofSize: translationFontSize, weight: .medium)
+
+        // 更新标签显隐
+        originalTitleLabel.isHidden = !showOriginalLabel
+        translationTitleLabel.isHidden = !showTranslationLabel
 
         // 原文标签颜色
         originalLabel.textColor = originalTextColor
@@ -302,13 +404,13 @@ class LOTranslationOverlayView: NSView {
     /// 不小于最小宽度，不大于最大宽度。避免短原文限制长翻译导致提前换行。
     func preferredSize() -> NSSize {
         let padding = Layout.padding
-        let maxContentWidth = Layout.maxWidth - padding * 2
+        let maxContentWidth = maxWidth - padding * 2
 
         // 用 layoutManager 在最大宽度下测量翻译实际占用尺寸（和渲染完全一致）
         let (translationUsedWidth, translationFullHeight) = measureTranslationLayout(maxWidth: maxContentWidth)
         let translationHeight = min(
             max(translationFullHeight, Layout.translationMinHeight),
-            Layout.translationMaxHeight
+            maxHeight
         )
 
         // 原文在最大宽度下的占用宽度
@@ -325,25 +427,27 @@ class LOTranslationOverlayView: NSView {
         let viewWidth = contentWidth + padding * 2
 
         // 用确定的宽度测量各部分高度
-        let originalTitleSize = originalTitleLabel.sizeThatFits(
-            NSSize(width: contentWidth, height: .greatestFiniteMagnitude)
-        )
+        let originalTitleSize = showOriginalLabel
+            ? originalTitleLabel.sizeThatFits(NSSize(width: contentWidth, height: .greatestFiniteMagnitude))
+            : .zero
         let originalSize = originalLabel.sizeThatFits(
             NSSize(width: contentWidth, height: .greatestFiniteMagnitude)
         )
-        let translationTitleSize = translationTitleLabel.sizeThatFits(
-            NSSize(width: contentWidth, height: .greatestFiniteMagnitude)
-        )
+        let translationTitleSize = showTranslationLabel
+            ? translationTitleLabel.sizeThatFits(NSSize(width: contentWidth, height: .greatestFiniteMagnitude))
+            : .zero
 
-        let contentHeight = originalTitleSize.height
-            + Layout.labelSpacing
-            + originalSize.height
-            + Layout.sectionSpacing
-            + 1 // divider
-            + Layout.sectionSpacing
-            + translationTitleSize.height
-            + Layout.labelSpacing
-            + translationHeight
+        // 累加高度：根据标签显隐决定是否计入
+        var contentHeight: CGFloat = 0
+        if showOriginalLabel {
+            contentHeight += originalTitleSize.height + Layout.labelSpacing
+        }
+        contentHeight += originalSize.height + Layout.sectionSpacing
+        contentHeight += 1 + Layout.sectionSpacing // divider
+        if showTranslationLabel {
+            contentHeight += translationTitleSize.height + Layout.labelSpacing
+        }
+        contentHeight += translationHeight
 
         let result = NSSize(
             width: viewWidth,
@@ -390,12 +494,14 @@ class LOTranslationOverlayView: NSView {
         // macOS 坐标系：左下角原点，从顶部向下布局
         var y = bounds.maxY - padding
 
-        // 原文标题
-        let origTitleH = originalTitleLabel.sizeThatFits(
-            NSSize(width: contentWidth, height: .greatestFiniteMagnitude)).height
-        originalTitleLabel.frame = NSRect(x: padding, y: y - origTitleH,
-                                          width: contentWidth, height: origTitleH)
-        y -= origTitleH + Layout.labelSpacing
+        // 原文标题（可隐藏）
+        if showOriginalLabel {
+            let origTitleH = originalTitleLabel.sizeThatFits(
+                NSSize(width: contentWidth, height: .greatestFiniteMagnitude)).height
+            originalTitleLabel.frame = NSRect(x: padding, y: y - origTitleH,
+                                              width: contentWidth, height: origTitleH)
+            y -= origTitleH + Layout.labelSpacing
+        }
 
         // 原文
         let origH = originalLabel.sizeThatFits(
@@ -408,24 +514,27 @@ class LOTranslationOverlayView: NSView {
         dividerView.frame = NSRect(x: padding, y: y - 1, width: contentWidth, height: 1)
         y -= 1 + Layout.sectionSpacing
 
-        // 翻译标题 + 复制按钮（同一行）
-        let transTitleH = translationTitleLabel.sizeThatFits(
-            NSSize(width: contentWidth, height: .greatestFiniteMagnitude)).height
-        let titleRowH = max(transTitleH, Layout.copyButtonSize)
-        translationTitleLabel.frame = NSRect(
-            x: padding, y: y - transTitleH,
-            width: contentWidth - Layout.copyButtonSize - Layout.labelSpacing,
-            height: transTitleH)
-        copyButton.frame = NSRect(
-            x: bounds.maxX - padding - Layout.copyButtonSize,
-            y: y - titleRowH / 2 - Layout.copyButtonSize / 2,
-            width: Layout.copyButtonSize, height: Layout.copyButtonSize)
-        y -= titleRowH + Layout.labelSpacing
+        // 翻译标题（复制按钮不再占行，改为浮在翻译区右侧）
+        if showTranslationLabel {
+            let transTitleH = translationTitleLabel.sizeThatFits(
+                NSSize(width: contentWidth, height: .greatestFiniteMagnitude)).height
+            translationTitleLabel.frame = NSRect(
+                x: padding, y: y - transTitleH,
+                width: contentWidth, height: transTitleH)
+            y -= transTitleH + Layout.labelSpacing
+        }
 
         // 翻译滚动视图（填满剩余空间）
         let scrollH = y - padding
-        translationScrollView.frame = NSRect(x: padding, y: padding,
-                                             width: contentWidth, height: max(0, scrollH))
+        let scrollFrame = NSRect(x: padding, y: padding,
+                                  width: contentWidth, height: max(0, scrollH))
+        translationScrollView.frame = scrollFrame
+
+        // 复制按钮浮在悬浮窗右下角（不占行高，仅悬停时显示）
+        copyButton.frame = NSRect(
+            x: bounds.maxX - padding - Layout.copyButtonSize,
+            y: padding,
+            width: Layout.copyButtonSize, height: Layout.copyButtonSize)
 
         if needsScrollToBottom {
             scrollToBottom()
@@ -463,10 +572,11 @@ class LOTranslationOverlayView: NSView {
         return (width, height)
     }
 
-    /// 根据当前状态更新复制按钮样式
+    /// 根据当前状态更新复制按钮样式与显隐
     private func updateCopyButtonAppearance() {
         copyButton.isEnabled = hasValidTranslation
         copyButton.contentTintColor = hasValidTranslation ? originalTextColor : Theme.disabledCopyColor
+        updateCopyButtonVisibility()
     }
 
     // MARK: - 复制

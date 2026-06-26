@@ -59,6 +59,30 @@ struct OverlayConfig {
 
     /// 翻译文字颜色
     var translationTextColor: NSColor = NSColor.white
+
+    /// 主题：dark / light / auto
+    var theme: String = "dark"
+
+    /// 点击穿透（开启后鼠标可穿透悬浮窗点击后方内容）
+    var clickThrough: Bool = false
+
+    /// 最大宽度（pt）
+    var maxWidth: CGFloat = 360
+
+    /// 最大高度（pt，翻译区超过此高度后滚动）
+    var maxHeight: CGFloat = 200
+
+    /// 原文字体大小
+    var originalFontSize: CGFloat = 14
+
+    /// 翻译字体大小
+    var translationFontSize: CGFloat = 14
+
+    /// 是否显示"原文"标签
+    var showOriginalLabel: Bool = true
+
+    /// 是否显示"翻译"标签
+    var showTranslationLabel: Bool = true
 }
 
 // MARK: - 翻译浮窗
@@ -108,6 +132,9 @@ class LOTranslationOverlay {
     /// 由 LOInputController 在 activateServer 时设置，返回当前输入光标的屏幕坐标
     var cursorPositionProvider: (() -> NSRect?)?
 
+    /// 最近一次翻译结果（供快捷键复制使用）
+    private var lastTranslation: String = ""
+
     // MARK: - 初始化
 
     init(config: OverlayConfig = OverlayConfig()) {
@@ -155,6 +182,7 @@ class LOTranslationOverlay {
     ///   - translation: 翻译结果
     func show(originalText: String, translation: String) {
         cancelDismissTimer()
+        lastTranslation = translation
         overlayView.update(original: originalText, translation: translation)
         resizeAndShow()
         scheduleDismissTimer()
@@ -182,9 +210,21 @@ class LOTranslationOverlay {
     /// - Parameter text: 翻译结果
     func updateTranslation(_ text: String) {
         cancelDismissTimer()
+        lastTranslation = text
         overlayView.updateTranslation(text)
         resizeAndShow()
         scheduleDismissTimer()
+    }
+
+    /// 复制最近一次翻译结果到剪贴板（供快捷键调用）
+    /// - Returns: 是否复制成功
+    @discardableResult
+    func copyLastTranslation() -> Bool {
+        guard !lastTranslation.isEmpty else { return false }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lastTranslation, forType: .string)
+        debugLog("快捷复制：已复制最近翻译内容")
+        return true
     }
 
     /// 隐藏浮窗
@@ -204,11 +244,8 @@ class LOTranslationOverlay {
     private func applyConfig() {
         panel.isMovableByWindowBackground = (config.positionMode == .draggable)
         panel.alphaValue = config.opacity
-        overlayView.updateColors(
-            backgroundColor: config.backgroundColor,
-            originalTextColor: config.originalTextColor,
-            translationTextColor: config.translationTextColor
-        )
+        // 穿透模式由 overlayView 的 hitTest 实现，确保复制按钮仍可点击
+        overlayView.updateConfig(config)
     }
 
     /// 调整尺寸并显示

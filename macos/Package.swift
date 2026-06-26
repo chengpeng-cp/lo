@@ -2,7 +2,7 @@
 
 import PackageDescription
 
-// MARK: - 语镜输入法 SPM 配置
+// MARK: - 语境输入法 SPM 配置
 
 let package = Package(
     name: "LOInputMethod",
@@ -32,7 +32,7 @@ let package = Package(
                 .target(name: "CRime")
             ],
             path: "LOInputMethod",
-            exclude: ["Info.plist", "Bridging-Header.h", "Resources/zh-Hans.lproj", "Resources/en.lproj"],
+            exclude: ["Info.plist", "Bridging-Header.h", "Resources/zh-Hans.lproj", "Resources/en.lproj", "Resources/AppIcon.icns", "Resources/InfoPlist.strings"],
             resources: [
                 .copy("Resources/rime")
             ],

@@ -5,6 +5,9 @@ import Foundation
 /// 翻译提供商配置，涵盖大模型（OpenAI 兼容）和免费翻译引擎
 enum TranslationProvider: String, CaseIterable {
 
+    // 免费翻译（无需 API Key），作为默认选择
+    case bing
+
     // 大模型（需要 API Key，均兼容 OpenAI Chat Completions 接口）
     case deepseek
     case glm
@@ -14,9 +17,6 @@ enum TranslationProvider: String, CaseIterable {
     case openai
     case volcengine
     case custom
-
-    // 免费翻译（无需 API Key）
-    case bing
 
     // MARK: - 显示信息
 
@@ -31,7 +31,7 @@ enum TranslationProvider: String, CaseIterable {
         case .openai:     return "OpenAI"
         case .volcengine: return "火山引擎（豆包）"
         case .custom:     return "自定义（OpenAI 兼容）"
-        case .bing:       return "必应翻译（免费）"
+        case .bing:       return "语境翻译（免费）"
         }
     }
 
@@ -72,8 +72,8 @@ enum TranslationProvider: String, CaseIterable {
         return allCases.filter { $0.isFree }
     }
 
-    /// 从字符串安全创建，未知值回退到 deepseek
+    /// 从字符串安全创建，未知值回退到 bing（语境翻译）
     static func from(_ rawValue: String) -> TranslationProvider {
-        return TranslationProvider(rawValue: rawValue) ?? .deepseek
+        return TranslationProvider(rawValue: rawValue) ?? .bing
     }
 }

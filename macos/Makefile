@@ -1,4 +1,4 @@
-# 语镜输入法构建与安装
+# 语境输入法构建与安装
 
 # 应用名称
 APP_NAME    := LOInputMethod

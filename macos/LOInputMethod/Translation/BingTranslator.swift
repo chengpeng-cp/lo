@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - 必应翻译器（免费）
+// MARK: - 语境翻译器（免费，基于微软 Edge 翻译接口）
 
 /// 基于微软 Edge 翻译接口的免费翻译器
 /// 利用 Edge 浏览器内置翻译的 auth 端点获取 token，无需 API Key
@@ -13,9 +13,6 @@ class BingTranslator: TranslationServiceProtocol {
     /// 翻译端点
     private let translateEndpoint = URL(string: "https://api.cognitive.microsofttranslator.com/translate")!
 
-    /// 目标语言
-    private let targetLanguage = "en"
-
     /// 请求超时时间
     private let timeoutInterval: TimeInterval = 10
 
@@ -25,17 +22,17 @@ class BingTranslator: TranslationServiceProtocol {
 
     // MARK: - 翻译服务协议
 
-    func translate(text: String, mode: TranslationMode) async throws -> String {
-        debugLog("[Bing] 开始翻译: text='\(text)' (长度=\(text.count))")
+    func translate(text: String, mode: TranslationMode, targetLanguage: TargetLanguage) async throws -> String {
+        debugLog("[Bing] 开始翻译: target=\(targetLanguage.rawValue) text='\(text)' (长度=\(text.count))")
 
         // 获取 auth token
         let token = try await getAuthToken()
 
-        // 构建请求 URL
+        // 构建请求 URL（不传 from 参数，Bing 自动检测源语言）
         var components = URLComponents(url: translateEndpoint, resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "api-version", value: "3.0"),
-            URLQueryItem(name: "to", value: targetLanguage)
+            URLQueryItem(name: "to", value: targetLanguage.rawValue)
         ]
 
         guard let url = components.url else {
@@ -54,10 +51,10 @@ class BingTranslator: TranslationServiceProtocol {
 
         debugLog("[Bing] 请求翻译")
 
-        // 发送请求
+        // 发送请求（复用共享 session 的连接池）
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await TranslationNetwork.shared.data(for: request)
         } catch {
             debugLog("[Bing] 网络请求失败: \(error.localizedDescription)")
             throw TranslationError.networkError(error)

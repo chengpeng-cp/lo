@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 语镜输入法：下载 rime-ice（雾凇拼音）社区词库
+# 语境输入法：下载 rime-ice（雾凇拼音）社区词库
 #
 # 从 rime-ice 仓库下载 cn_dicts/ 下的词典文件到 Resources/rime/cn_dicts/。
 # 这些词库简体、常用词丰富、词频合理，替换原 7 万条繁体+生僻字词典。

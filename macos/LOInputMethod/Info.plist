@@ -78,8 +78,8 @@
     <!-- 启用 CapsLock 切换 ABC（对齐 fcitx5-macos 方案）
          把 CapsLock→ABC 交给 macOS 系统原生处理，输入法进程无需拦截事件、
          无需辅助功能权限、无需 CGEventTap。系统原生行为：
-           语镜中文模式下按 CapsLock → 切到 ABC（系统处理）
-           ABC 下按 CapsLock → 切回上一个中文输入法（通常即语镜）
+           语境中文模式下按 CapsLock → 切到 ABC（系统处理）
+           ABC 下按 CapsLock → 切回上一个中文输入法（通常即语境）
          前提：系统中不要同时启用多个中文输入法，否则回切可能切到别的。 -->
     <key>TICapsLockLanguageSwitchCapable</key>
     <true/>

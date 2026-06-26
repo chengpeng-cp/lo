@@ -7,10 +7,12 @@ import Foundation
 class TranslationScheduler {
 
     /// 单例
-    static let shared = TranslationScheduler()
+    /// init 保持为空，实际翻译器延迟到首次主线程访问时创建，
+    /// 避免输入法控制器（非 @MainActor）引用 shared 时触发并发检查警告。
+    nonisolated static let shared = TranslationScheduler()
 
-    /// 翻译服务实例
-    private var translator: TranslationServiceProtocol
+    /// 翻译服务实例（延迟初始化，确保在主线程上创建）
+    private lazy var translator: TranslationServiceProtocol = Self.createTranslator(for: LOSettings.load())
 
     /// 翻译缓存
     private let cache = TranslationCache.shared
@@ -51,14 +53,18 @@ class TranslationScheduler {
     /// 翻译完成（原文, 译文）
     var onTranslationReady: ((String, String) -> Void)?
 
+    /// 流式翻译增量（原文, 累积译文）：大模型边生成边更新悬浮窗，降低首字延迟
+    /// 仅在启用流式翻译且引擎支持时触发；免费引擎一次性回调全量
+    var onTranslationDelta: ((String, String) -> Void)?
+
     /// 翻译失败（原文, 错误信息）
     var onTranslationFailed: ((String, String) -> Void)?
 
     // MARK: - 初始化
 
-    private init() {
-        // 根据设置创建翻译器
-        self.translator = Self.createTranslator(for: LOSettings.load())
+    nonisolated private init() {
+        // 保持为空：翻译器通过 lazy var 延迟到主线程首次访问时创建，
+        // 避免 init 被 nonisolated(unsafe) shared 引用时触发 main actor 检查。
     }
 
     // MARK: - 公开接口
@@ -68,6 +74,9 @@ class TranslationScheduler {
     /// 但这段时间用户并未真的停顿，不应触发段落断句，否则前面已 commit 的数字/字母会被丢弃。
     /// - Parameter text: 当前组合输入的预编辑文本（可为空，仅表示有按键活动）
     func noteTyping(preedit: String = "") {
+        // 翻译功能关闭时，不执行任何翻译逻辑
+        guard settings.translationEnabled else { return }
+
         lock.lock()
         // 仅刷新时间基准与段落超时定时器，不改变 currentSegment
         lastCommitTime = Date()
@@ -84,6 +93,9 @@ class TranslationScheduler {
     /// 会先判断是否需要开启新段落，然后启动防抖计时
     /// - Parameter text: 用户提交的文本
     func commit(text: String) {
+        // 翻译功能关闭时，不执行任何翻译逻辑
+        guard settings.translationEnabled else { return }
+
         lock.lock()
 
         let isSegmentEmpty = currentSegment.isEmpty
@@ -138,7 +150,32 @@ class TranslationScheduler {
 
     /// 更新翻译服务（切换翻译提供商或模型时调用）
     func updateTranslator() {
-        translator = Self.createTranslator(for: LOSettings.load())
+        let settings = LOSettings.load()
+        translator = Self.createTranslator(for: settings)
+        // 预热连接：提前与当前翻译端点建立 TCP+TLS，后续请求可复用，减少首次翻译握手延迟
+        Self.warmupConnection(for: settings)
+    }
+
+    /// 预热翻译端点连接
+    /// 判断实际会使用的引擎：LLM 配置完整则预热 LLM 端点，否则预热 Bing 兜底端点
+    private static func warmupConnection(for settings: LOSettings) {
+        let provider = TranslationProvider.from(settings.translationProvider)
+        let hasAPIKey = !(settings.getAPIKey(provider: provider.rawValue) ?? "").isEmpty
+        let useLLM = !provider.isFree && hasAPIKey && !settings.translationModel.isEmpty
+
+        let url: URL?
+        if useLLM {
+            if provider == .custom {
+                url = URL(string: settings.customLLMBaseURL)
+            } else {
+                url = URL(string: provider.baseURL)
+            }
+        } else {
+            // 免费引擎（Bing）预热 token 端点
+            url = URL(string: "https://edge.microsoft.com/translate/auth")
+        }
+        guard let url = url else { return }
+        TranslationNetwork.warmup(url: url)
     }
 
     // MARK: - 翻译器工厂
@@ -156,7 +193,7 @@ class TranslationScheduler {
         // 大模型翻译：检查 API Key
         let apiKey = settings.getAPIKey(provider: provider.rawValue) ?? ""
         if apiKey.isEmpty {
-            debugLog("[Scheduler] \(provider.rawValue) 未配置 API Key，回退到必应免费翻译")
+            debugLog("[Scheduler] \(provider.rawValue) 未配置 API Key，回退到语境免费翻译")
             return BingTranslator()
         }
 
@@ -173,7 +210,8 @@ class TranslationScheduler {
     // MARK: - 文本过滤
 
     /// 判断文本是否需要翻译
-    /// 过滤空文本、纯标点；允许中文或数字进入翻译
+    /// 过滤空文本、纯标点；包含非 ASCII 字符（中文、日文、韩文、西里尔文等）或数字才翻译。
+    /// 纯 ASCII 英文不翻译（避免 ASCII 模式下输入英文触发无意义翻译）。
     private func shouldTranslate(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -186,18 +224,11 @@ class TranslationScheduler {
         let withoutPunctuation = trimmed.unicodeScalars.filter { !punctuationSet.contains($0) }
         guard !withoutPunctuation.isEmpty else { return false }
 
-        // 必须包含中文字符或数字才翻译
-        let hasChineseOrDigit = trimmed.unicodeScalars.contains { scalar in
-            // CJK 统一汉字范围
-            (0x4E00...0x9FFF).contains(scalar.value) ||
-            // CJK 扩展 A
-            (0x3400...0x4DBF).contains(scalar.value) ||
-            // CJK 兼容汉字
-            (0xF900...0xFAFF).contains(scalar.value) ||
-            // 阿拉伯数字
-            CharacterSet.decimalDigits.contains(scalar)
+        // 包含非 ASCII 字符或数字才翻译
+        let hasTranslatableChar = trimmed.unicodeScalars.contains { scalar in
+            CharacterSet.decimalDigits.contains(scalar) || scalar.value > 0x7E
         }
-        guard hasChineseOrDigit else { return false }
+        guard hasTranslatableChar else { return false }
 
         return true
     }
@@ -260,8 +291,12 @@ class TranslationScheduler {
 
         debugLog("[Scheduler] 触发翻译: '\(text)' (长度=\(text.count))")
 
+        // 获取当前翻译模式与目标语言
+        let mode = TranslationMode(rawValue: settings.translationMode) ?? .fluent
+        let targetLang = TargetLanguage(rawValue: settings.targetLanguage) ?? .english
+
         // 检查缓存
-        if let cached = cache.get(text: text) {
+        if let cached = cache.get(text: text, targetLanguage: targetLang.rawValue) {
             debugLog("[Scheduler] 命中缓存")
             onTranslationReady?(text, cached)
             return
@@ -270,17 +305,36 @@ class TranslationScheduler {
         // 通知翻译开始
         onTranslationStart?(text)
 
-        // 获取当前翻译模式
-        let mode = TranslationMode(rawValue: settings.translationMode) ?? .fluent
-
         // 取消进行中的旧翻译任务，避免旧结果/错误覆盖当前状态
         currentTranslationTask?.cancel()
+
+        // 大模型翻译默认走流式（边生成边显示），语境等传统机器翻译一次性返回
+        let provider = TranslationProvider.from(settings.translationProvider)
+        let useStream = !provider.isFree
 
         // 异步执行翻译
         let task = Task { [weak self] in
             guard let self = self else { return }
             do {
-                let result = try await self.translator.translate(text: text, mode: mode)
+                let result: String
+                if useStream {
+                    // 流式：每个增量片段累积后回调 UI 实时更新悬浮窗
+                    var accumulated = ""
+                    result = try await self.translator.translateStream(
+                        text: text,
+                        mode: mode,
+                        targetLanguage: targetLang
+                    ) { [weak self] delta in
+                        accumulated += delta
+                        let snapshot = accumulated
+                        DispatchQueue.main.async {
+                            self?.onTranslationDelta?(text, snapshot)
+                        }
+                    }
+                } else {
+                    result = try await self.translator.translate(text: text, mode: mode, targetLanguage: targetLang)
+                }
+
                 // 任务被取消时不再回调（用户已输入新内容，旧结果无意义）
                 if Task.isCancelled {
                     debugLog("[Scheduler] 翻译已取消（旧任务）: '\(text)'")
@@ -288,7 +342,7 @@ class TranslationScheduler {
                 }
                 debugLog("[Scheduler] 翻译完成: '\(text)' → '\(result)'")
                 // 缓存结果
-                self.cache.set(text: text, translation: result)
+                self.cache.set(text: text, translation: result, targetLanguage: targetLang.rawValue)
                 // 回调主线程
                 DispatchQueue.main.async {
                     self.onTranslationReady?(text, result)

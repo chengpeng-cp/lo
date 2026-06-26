@@ -3,7 +3,7 @@ import InputMethodKit
 
 // MARK: - 应用代理
 
-/// 语镜输入法应用代理，负责初始化输入法服务器
+/// 语境输入法应用代理，负责初始化输入法服务器
 class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 单例引用，供输入法菜单（IMK menu）作为 target 强引用，

@@ -44,13 +44,15 @@ class TranslationCache {
     // MARK: - 公开接口
 
     /// 获取缓存的翻译结果
-    /// - Parameter text: 原文
+    /// - Parameters:
+    ///   - text: 原文
+    ///   - targetLanguage: 目标语言代码
     /// - Returns: 翻译结果，如果没有缓存则返回 nil
-    func get(text: String) -> String? {
+    func get(text: String, targetLanguage: String) -> String? {
         lock.lock()
         defer { lock.unlock() }
 
-        let key = cacheKey(text)
+        let key = cacheKey(text, targetLanguage: targetLanguage)
         guard let value = cache[key] else { return nil }
 
         // 更新访问顺序（移到末尾）
@@ -66,11 +68,12 @@ class TranslationCache {
     /// - Parameters:
     ///   - text: 原文
     ///   - translation: 翻译结果
-    func set(text: String, translation: String) {
+    ///   - targetLanguage: 目标语言代码
+    func set(text: String, translation: String, targetLanguage: String) {
         lock.lock()
         defer { lock.unlock() }
 
-        let key = cacheKey(text)
+        let key = cacheKey(text, targetLanguage: targetLanguage)
 
         // 如果已存在，更新访问顺序
         if cache[key] != nil {
@@ -101,9 +104,9 @@ class TranslationCache {
 
     // MARK: - 私有方法
 
-    /// 生成缓存 key（小写 + 去除首尾空白）
-    private func cacheKey(_ text: String) -> String {
-        return text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    /// 生成缓存 key（目标语言 + 小写 + 去除首尾空白）
+    private func cacheKey(_ text: String, targetLanguage: String) -> String {
+        return targetLanguage + "::" + text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     /// LRU 淘汰超出限制的条目

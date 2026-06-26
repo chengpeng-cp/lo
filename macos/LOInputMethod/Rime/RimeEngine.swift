@@ -257,7 +257,7 @@ class RimeEngine {
     func commitComposition(session: RimeSessionId) -> String? {
         guard session != 0 else { return nil }
         // 发送 Escape 取消组合，或者使用 commit_composition
-        api.pointee.commit_composition(session)
+        _ = api.pointee.commit_composition(session)
         return getCommit(session: session)
     }
 
