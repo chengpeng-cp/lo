@@ -75,7 +75,7 @@ std::wstring LOBingTranslator::Translate(const std::wstring& text,
 
     // 解析响应 [{"translations":[{"text":"..."}]}]
     LOJsonValue root;
-    if (!LOParseJson(resp, root) || root.type != LOJsonValue::Array) {
+    if (!LOParseJson(resp, root) || root.valueType != LOJsonValue::kArray) {
         LOLog(L"[Bing] 响应 JSON 解析失败: %s\r\n", LOUtf8ToWide(resp).c_str());
         return L"[翻译失败：响应解析错误]";
     }
@@ -83,11 +83,11 @@ std::wstring LOBingTranslator::Translate(const std::wstring& text,
     const LOJsonValue* first = root.At(0);
     if (!first) return L"[翻译失败：响应为空]";
     const LOJsonValue* translations = first->Find(L"translations");
-    if (!translations || translations->type != LOJsonValue::Array) return L"[翻译失败：无 translations 字段]";
+    if (!translations || translations->valueType != LOJsonValue::kArray) return L"[翻译失败：无 translations 字段]";
     const LOJsonValue* firstTrans = translations->At(0);
     if (!firstTrans) return L"[翻译失败：translations 为空]";
     const LOJsonValue* textVal = firstTrans->Find(L"text");
-    if (!textVal || textVal->type != LOJsonValue::String) return L"[翻译失败：无 text 字段]";
+    if (!textVal || textVal->valueType != LOJsonValue::kString) return L"[翻译失败：无 text 字段]";
 
     return textVal->strVal;
 }

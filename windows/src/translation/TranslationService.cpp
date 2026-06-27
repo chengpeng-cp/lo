@@ -6,7 +6,7 @@
 // ============================================================================
 
 const LOJsonValue* LOJsonValue::Find(const std::wstring& key) const {
-    if (type != Object) return nullptr;
+    if (valueType != kObject) return nullptr;
     for (const auto& kv : objVal) {
         if (kv.first == key) return &kv.second;
     }
@@ -14,7 +14,7 @@ const LOJsonValue* LOJsonValue::Find(const std::wstring& key) const {
 }
 
 const LOJsonValue* LOJsonValue::At(size_t i) const {
-    if (type != Array) return nullptr;
+    if (valueType != kArray) return nullptr;
     if (i >= arrVal.size()) return nullptr;
     return &arrVal[i];
 }
@@ -101,14 +101,14 @@ struct JsonParser {
         char c = *p;
         if (c == '{') return ParseObject(out);
         if (c == '[') return ParseArray(out);
-        if (c == '"') { out.type = LOJsonValue::String; return ParseString(out.strVal); }
+        if (c == '"') { out.valueType = LOJsonValue::kString; return ParseString(out.strVal); }
         if (c == 't' || c == 'f') return ParseBool(out);
         if (c == 'n') return ParseNull(out);
         return ParseNumber(out);
     }
 
     bool ParseObject(LOJsonValue& out) {
-        out.type = LOJsonValue::Object;
+        out.valueType = LOJsonValue::kObject;
         ++p; // 跳过 '{'
         SkipWs();
         if (p < end && *p == '}') { ++p; return true; }
@@ -133,7 +133,7 @@ struct JsonParser {
     }
 
     bool ParseArray(LOJsonValue& out) {
-        out.type = LOJsonValue::Array;
+        out.valueType = LOJsonValue::kArray;
         ++p; // 跳过 '['
         SkipWs();
         if (p < end && *p == ']') { ++p; return true; }
@@ -228,7 +228,7 @@ struct JsonParser {
     }
 
     bool ParseNumber(LOJsonValue& out) {
-        out.type = LOJsonValue::Number;
+        out.valueType = LOJsonValue::kNumber;
         const char* start = p;
         if (p < end && (*p == '-' || *p == '+')) ++p;
         while (p < end && ((*p >= '0' && *p <= '9') || *p == '.' || *p == 'e' || *p == 'E' || *p == '+' || *p == '-')) ++p;
@@ -239,7 +239,7 @@ struct JsonParser {
     }
 
     bool ParseBool(LOJsonValue& out) {
-        out.type = LOJsonValue::Bool;
+        out.valueType = LOJsonValue::kBool;
         if (end - p >= 4 && p[0] == 't' && p[1] == 'r' && p[2] == 'u' && p[3] == 'e') {
             out.boolVal = true; p += 4; return true;
         }
@@ -250,7 +250,7 @@ struct JsonParser {
     }
 
     bool ParseNull(LOJsonValue& out) {
-        out.type = LOJsonValue::Null;
+        out.valueType = LOJsonValue::kNull;
         if (end - p >= 4 && p[0] == 'n' && p[1] == 'u' && p[2] == 'l' && p[3] == 'l') {
             p += 4; return true;
         }

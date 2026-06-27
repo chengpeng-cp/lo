@@ -142,7 +142,7 @@ void LOTranslationCache::Load() {
 
     // 解析 JSON 数组 [{"k":"...","v":"..."}, ...]
     LOJsonValue root;
-    if (!LOParseJson(content, root) || root.type != LOJsonValue::Array) {
+    if (!LOParseJson(content, root) || root.valueType != LOJsonValue::kArray) {
         LOLog(L"[Cache] 缓存文件解析失败\r\n");
         return;
     }
@@ -151,7 +151,7 @@ void LOTranslationCache::Load() {
     for (const auto& item : root.arrVal) {
         const LOJsonValue* k = item.Find(L"k");
         const LOJsonValue* v = item.Find(L"v");
-        if (!k || !v || k->type != LOJsonValue::String || v->type != LOJsonValue::String) continue;
+        if (!k || !v || k->valueType != LOJsonValue::kString || v->valueType != LOJsonValue::kString) continue;
         if (m_map.find(k->strVal) != m_map.end()) continue;
         m_lru.push_back({k->strVal, v->strVal});
         m_map[k->strVal] = std::prev(m_lru.end());

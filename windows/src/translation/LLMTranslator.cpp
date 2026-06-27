@@ -102,7 +102,7 @@ std::wstring LOLLMTranslator::ParseResponse(const std::string& resp) {
         return L"";
     }
     const LOJsonValue* choices = root.Find(L"choices");
-    if (!choices || choices->type != LOJsonValue::Array) {
+    if (!choices || choices->valueType != LOJsonValue::kArray) {
         // 检查错误信息
         const LOJsonValue* err = root.Find(L"error");
         if (err) {
@@ -119,7 +119,7 @@ std::wstring LOLLMTranslator::ParseResponse(const std::string& resp) {
     const LOJsonValue* message = first->Find(L"message");
     if (!message) return L"";
     const LOJsonValue* content = message->Find(L"content");
-    if (!content || content->type != LOJsonValue::String) return L"";
+    if (!content || content->valueType != LOJsonValue::kString) return L"";
     return content->strVal;
 }
 
@@ -186,13 +186,13 @@ std::wstring LOLLMTranslator::TranslateStream(const std::wstring& text,
             LOJsonValue chunk;
             if (!LOParseJson(line, chunk)) return true; // 跳过无法解析的行
             const LOJsonValue* choices = chunk.Find(L"choices");
-            if (!choices || choices->type != LOJsonValue::Array) return true;
+            if (!choices || choices->valueType != LOJsonValue::kArray) return true;
             const LOJsonValue* first = choices->At(0);
             if (!first) return true;
             const LOJsonValue* delta = first->Find(L"delta");
             if (!delta) return true;
             const LOJsonValue* content = delta->Find(L"content");
-            if (!content || content->type != LOJsonValue::String) return true;
+            if (!content || content->valueType != LOJsonValue::kString) return true;
 
             accumulated += content->strVal;
             if (onDelta) onDelta(accumulated);

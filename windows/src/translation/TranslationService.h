@@ -57,8 +57,8 @@ public:
 // ============================================================================
 
 struct LOJsonValue {
-    enum Type { Null, Bool, Number, String, Array, Object };
-    Type type = Null;
+    enum ValueType { kNull, kBool, kNumber, kString, kArray, kObject };
+    ValueType valueType = kNull;
 
     bool boolVal = false;
     double numVal = 0.0;
@@ -71,7 +71,7 @@ struct LOJsonValue {
     // 在 Array 中按下标取值，越界返回 nullptr
     const LOJsonValue* At(size_t i) const;
     // 便捷取字符串
-    std::wstring AsString() const { return type == String ? strVal : L""; }
+    std::wstring AsString() const { return valueType == kString ? strVal : L""; }
 };
 
 // 解析 JSON 文本（UTF-8 输入），失败返回 false

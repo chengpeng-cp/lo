@@ -90,7 +90,7 @@ private:
     void OnCommitText(const std::wstring& text);
 
     // --- 引用计数 ---
-    std::atomic<LONG> m_refCount;
+    volatile LONG m_refCount = 0;
 
     // --- TSF ---
     ITfThreadMgr* m_threadMgr;
