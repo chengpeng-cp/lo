@@ -142,7 +142,7 @@ STDMETHODIMP LOTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfCl
         // 继续执行，即使 Rime 失败，也注册键盘事件接收按键
     }
 
-    m_sessionManager = std::make_unique<LORimeSessionManager>(m_rimeEngine);
+    m_sessionManager = std::make_unique<LORimeSessionManager>(m_rimeEngine.get());
 
     // 2. 创建候选词窗口
     m_candidateWindow = std::make_unique<LOCandidateWindow>();
