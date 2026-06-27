@@ -109,6 +109,9 @@ Section "Install" SecInstall
     ; 主 DLL
     File "..\build\bin\Release\LOInputMethod.dll"
     
+    ; librime 运行时依赖
+    File "..\build\bin\Release\rime.dll"
+    
     ; Rime 配置
     File /r "..\build\bin\Release\rime\*.*"
     
@@ -173,6 +176,7 @@ Section "Uninstall"
 
     ; --- 删除文件 ---
     Delete "$INSTDIR\LOInputMethod.dll"
+    Delete "$INSTDIR\rime.dll"
     Delete "$INSTDIR\uninstall.exe"
     Delete "$INSTDIR\README.txt"
     RMDir /r "$INSTDIR\rime"

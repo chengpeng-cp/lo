@@ -245,7 +245,7 @@ class TranslationScheduler {
             withTimeInterval: debounceInterval,
             repeats: false
         ) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.executeTranslation()
             }
         }
