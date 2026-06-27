@@ -1,4 +1,4 @@
-; ============================================================================
+﻿; ============================================================================
 ; 语境输入法 Windows 版 - NSIS 安装脚本
 ;
 ; 用法：
@@ -26,7 +26,7 @@
 
 ; --- 基本配置 ---
 Name "${APP_NAME}"
-OutFile "..\dist\${APP_NAME}-Setup-${APP_VERSION}.exe"
+OutFile "..\dist\${APP_NAME_EN}-Setup-${APP_VERSION}.exe"
 Unicode True
 RequestExecutionLevel admin
 ShowInstDetails show

@@ -70,7 +70,7 @@ jobs:
           # 统一改名为带 CI 版本号
           for f in *.dmg; do
             if [[ -f "$f" ]]; then
-              mv "$f" "语境输入法-${{ steps.ver.outputs.version }}.dmg"
+              mv "$f" "LOInputMethod-${{ steps.ver.outputs.version }}.dmg"
             fi
           done
           ls -la
@@ -111,7 +111,7 @@ jobs:
 
             ### Windows
 
-            1. 下载 `语境输入法-Setup-${{ steps.ver.outputs.version }}.exe`
+            1. 下载 `LOInputMethod-Setup-${{ steps.ver.outputs.version }}.exe`
             2. 双击运行,按提示完成安装
             3. 打开「系统设置 > 时间和语言 > 语言和区域」
             4. 在「中文（简体）> 语言选项 > 键盘」中添加「语境输入法」
