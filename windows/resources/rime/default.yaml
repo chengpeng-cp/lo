@@ -1,0 +1,75 @@
+# Rime default settings
+# encoding: utf-8
+
+config_version: '0.50'
+
+schema_list:
+  - schema: luna_pinyin
+
+switcher:
+  caption: 〔方案選單〕
+  hotkeys:
+    - Control+grave
+    - Control+Shift+grave
+    - F4
+  save_options:
+    - full_shape
+    - ascii_punct
+    - simplification
+    - extended_charset
+    - zh_hant
+    - zh_hans
+    - zh_hant_tw
+  fold_options: true
+  abbreviate_options: true
+  option_list_separator: '／'
+
+menu:
+  page_size: 5
+
+punctuator:
+  full_shape:
+    __include: punctuation:/full_shape
+  half_shape:
+    __include: punctuation:/half_shape
+
+key_binder:
+  bindings:
+    __patch:
+      - key_bindings:/emacs_editing
+      - key_bindings:/paging_with_minus_equal
+      - key_bindings:/paging_with_comma_period
+      - key_bindings:/numbered_mode_switch
+
+selector:
+  __patch:
+    bindings:
+      __include: key_bindings:/rotate_candidate_with_tab
+    linear/bindings:
+      __include: key_bindings:/rotate_candidate_with_tab
+    vertical/bindings:
+      __include: key_bindings:/rotate_candidate_with_tab
+    vertical/linear/bindings:
+      __include: key_bindings:/rotate_candidate_with_tab
+
+recognizer:
+  patterns:
+    email: "^[A-Za-z][-_.0-9A-Za-z]*@.*$"
+    uppercase: "[A-Z][-_+.'0-9A-Za-z]*$"
+    url: "^(www[.]|https?:|ftp[.:]|mailto:|file:).*$|^[a-z]+[.].+$"
+
+ascii_composer:
+  good_old_caps_lock: true
+  switch_key:
+    # 中英切换由 Swift 层 handleFlagsChanged 处理：短按 Shift toggle Rime ascii_mode。
+    # CapsLock 不切换 ascii_mode（noop），仅由 macOS 原生物理状态控制大小写：
+    #   ascii_mode=英文 + CapsLock off → 小写英文
+    #   ascii_mode=英文 + CapsLock on  → 大写英文
+    #   ascii_mode=中文 → 中文
+    # good_old_caps_lock=true：ascii 模式下 CapsLock 控制大小写。
+    Shift_L: noop
+    Shift_R: noop
+    Control_L: noop
+    Control_R: noop
+    Caps_Lock: noop
+    Eisu_toggle: clear

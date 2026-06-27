@@ -1,0 +1,55 @@
+// ============================================================================
+// 语境输入法 Windows 版 - 资源文件
+// ============================================================================
+
+#include <windows.h>
+
+// --- 版本信息 ---
+#define VER_FILEVERSION             1,0,0,0
+#define VER_FILEVERSION_STR         "1.0.0.0"
+#define VER_PRODUCTVERSION          1,0,0,0
+#define VER_PRODUCTVERSION_STR      "1.0.0.0"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION    VER_FILEVERSION
+PRODUCTVERSION VER_PRODUCTVERSION
+FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+FILEFLAGS     0L
+FILEOS        VOS_NT_WINDOWS32
+FILETYPE      VFT_DLL
+FILESUBTYPE   VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080403B0"    // 简体中文, Unicode
+        BEGIN
+            VALUE "CompanyName",      "LO"
+            VALUE "FileDescription",   "语境输入法"
+            VALUE "FileVersion",      VER_FILEVERSION_STR
+            VALUE "InternalName",     "LOInputMethod"
+            VALUE "LegalCopyright",   "Copyright (C) 2026"
+            VALUE "OriginalFilename", "LOInputMethod.dll"
+            VALUE "ProductName",      "语境输入法"
+            VALUE "ProductVersion",   VER_PRODUCTVERSION_STR
+        END
+        BLOCK "040904B0"    // English, Unicode
+        BEGIN
+            VALUE "CompanyName",      "LO"
+            VALUE "FileDescription",  "Context Input Method"
+            VALUE "FileVersion",      VER_FILEVERSION_STR
+            VALUE "InternalName",     "LOInputMethod"
+            VALUE "LegalCopyright",   "Copyright (C) 2026"
+            VALUE "OriginalFilename", "LOInputMethod.dll"
+            VALUE "ProductName",      "Context Input Method"
+            VALUE "ProductVersion",   VER_PRODUCTVERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200   // 简体中文, Unicode
+    END
+END
+
+// --- 应用清单（DPI 感知 + 通用控件 v6）---
+// 创建独立清单文件并在 rc 中引用
+1 24 "app.manifest"

@@ -1,0 +1,12 @@
+; ============================================================================
+; 语境输入法 DLL 导出定义
+; COM DLL 导出的标准函数
+; ============================================================================
+
+LIBRARY LOInputMethod
+
+EXPORTS
+    DllGetClassObject   PRIVATE
+    DllCanUnloadNow     PRIVATE
+    DllRegisterServer   PRIVATE
+    DllUnregisterServer PRIVATE

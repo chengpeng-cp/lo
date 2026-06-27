@@ -1,0 +1,38 @@
+# 构建输出
+build/
+dist/
+out/
+
+# 第三方依赖
+third_party/
+
+# vcpkg
+vcpkg_installed/
+
+# Visual Studio 临时文件
+.vs/
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.aps
+*.pdb
+*.ipdb
+*.iobj
+*.obj
+*.tlog
+*.log
+*.idb
+*.ilk
+*.exp
+*.lib
+*.dll.manifest
+
+# CMake 缓存
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakePresets.json
+
+# 安装包临时文件
+*.tmp

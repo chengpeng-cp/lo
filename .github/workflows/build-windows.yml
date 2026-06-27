@@ -1,0 +1,140 @@
+# ============================================================================
+# 语境输入法 Windows 版 - 自动构建与打包
+#
+# 触发方式：
+#   1. 推送 tag（v*）           → 构建并发布 Release
+#   2. 手动触发（workflow_dispatch）→ 构建并上传 artifact
+#   3. 推送 main/master 分支      → 构建验证（不发布）
+#
+# 使用方法（macOS 开发者）：
+#   # 方式 A：手动触发，下载 artifact
+#   gh workflow run build-windows.yml
+#   gh run watch
+#   gh run download
+#
+#   # 方式 B：打 tag 自动发布 Release
+#   git tag v1.0.0
+#   git push origin v1.0.0
+#   # Release 页面会自动出现 exe 下载链接
+# ============================================================================
+
+name: Build Windows Installer
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（用于命名安装包，留空则使用 run number）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write   # 发布 Release 需要
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install librime via vcpkg
+        run: vcpkg install librime:x64-windows
+
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: Download rime-ice dict
+        shell: bash
+        run: |
+          cd windows
+          bash scripts/fetch-dict.sh || echo "词库下载失败，使用基础词库"
+
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            VER="${{ inputs.version }}"
+          else
+            VER="0.0.0-dev${{ github.run_number }}"
+          fi
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "版本号: $VER"
+
+      - name: Configure CMake
+        shell: cmd
+        run: |
+          cd windows
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake ^
+            -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build
+        shell: cmd
+        run: |
+          cd windows
+          cmake --build build --config Release --parallel
+
+      - name: Prepare package resources
+        shell: cmd
+        run: |
+          copy /Y windows\installer\README.txt windows\build\bin\Release\README.txt
+
+      - name: Build NSIS installer
+        shell: cmd
+        run: |
+          cd windows\installer
+          makensis installer.nsi
+
+      - name: Rename installer with version
+        shell: bash
+        run: |
+          cd windows/dist
+          ls -la
+          for f in *-Setup-*.exe; do
+            if [[ -f "$f" ]]; then
+              mv "$f" "语境输入法-Setup-${{ steps.ver.outputs.version }}.exe"
+            fi
+          done
+          ls -la
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LOInputMethod-Setup-${{ steps.ver.outputs.version }}
+          path: windows/dist/*.exe
+          retention-days: 30
+
+      - name: Publish Release on tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 语境输入法 ${{ steps.ver.outputs.version }}
+          body: |
+            # 语境输入法 v${{ steps.ver.outputs.version }}
+
+            ## 安装方法
+            1. 下载下方的 `语境输入法-Setup-${{ steps.ver.outputs.version }}.exe`
+            2. 双击运行，按提示完成安装
+            3. 打开「系统设置 > 时间和语言 > 语言和区域」
+            4. 在「中文（简体）> 语言选项 > 键盘」中添加「语境输入法」
+            5. 使用 Win+Space 切换到语境输入法
+
+            ## 系统要求
+            - Windows 10 1809+ 或 Windows 11
+            - 64 位系统
+          files: windows/dist/*.exe
+          draft: false
+          prerelease: false

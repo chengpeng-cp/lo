@@ -1,0 +1,9 @@
+# 语境输入法朙月拼音方案自定义配置
+# 此文件覆盖 luna_pinyin.schema.yaml 中的默认值
+
+patch:
+  # 候选词数量
+  "menu/page_size": 9
+
+  # 标点符号：使用中文标点
+  "punctuator/import_preset": default
