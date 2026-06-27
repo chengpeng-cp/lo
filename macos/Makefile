@@ -31,7 +31,7 @@ install-dict: fetch-dict
 
 ## 构建 release 版本
 build:
-	swift build -c release -Xswiftc -swift-version -Xswiftc 5
+	swift build -c release -Xswiftc -strict-concurrency=minimal
 
 ## 安装前清理：先杀进程，再删除所有位置的旧 bundle，
 ## 注销旧 LaunchServices 注册，清除废纸篓残留，防止输入法列表出现重复项
