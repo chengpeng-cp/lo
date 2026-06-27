@@ -260,24 +260,24 @@ void SaveModelForProvider(const std::wstring& provider, const std::wstring& mode
 // ============================================================================
 HWND CreateCtrl(HWND parent, const wchar_t* cls, DWORD style, DWORD exStyle,
                  int x, int y, int w, int h, int id, HFONT font) {
-    HWND h = CreateWindowExW(exStyle, cls, L"", style | WS_CHILD,
+    HWND hwnd = CreateWindowExW(exStyle, cls, L"", style | WS_CHILD,
                              x, y, w, h, parent, (HMENU)(INT_PTR)id, g_hInstance, nullptr);
-    if (h && font) SendMessageW(h, WM_SETFONT, (WPARAM)font, TRUE);
-    return h;
+    if (hwnd && font) SendMessageW(hwnd, WM_SETFONT, (WPARAM)font, TRUE);
+    return hwnd;
 }
 
 HWND CreateLabel(HWND parent, const wchar_t* text, int x, int y, int w, int h, HFONT font) {
-    HWND h = CreateCtrl(parent, WC_STATICW, SS_LEFT, 0, x, y, w, h, 0, font);
-    if (h) SetWindowTextW(h, text);
-    return h;
+    HWND hwnd = CreateCtrl(parent, WC_STATICW, SS_LEFT, 0, x, y, w, h, 0, font);
+    if (hwnd) SetWindowTextW(hwnd, text);
+    return hwnd;
 }
 
 HWND CreateCheckbox(HWND parent, const wchar_t* text, int x, int y, int w, int h,
                     int id, HFONT font) {
-    HWND h = CreateCtrl(parent, WC_BUTTONW, BS_AUTOCHECKBOX | WS_TABSTOP, 0,
+    HWND hwnd = CreateCtrl(parent, WC_BUTTONW, BS_AUTOCHECKBOX | WS_TABSTOP, 0,
                         x, y, w, h, id, font);
-    if (h) SetWindowTextW(h, text);
-    return h;
+    if (hwnd) SetWindowTextW(hwnd, text);
+    return hwnd;
 }
 
 HWND CreateEdit(HWND parent, DWORD style, int x, int y, int w, int h, int id, HFONT font) {
@@ -292,15 +292,15 @@ HWND CreateCombo(HWND parent, int x, int y, int w, int h, int id, HFONT font) {
 
 HWND CreateButton(HWND parent, const wchar_t* text, DWORD style, int x, int y,
                   int w, int h, int id, HFONT font) {
-    HWND h = CreateCtrl(parent, WC_BUTTONW, style | WS_TABSTOP, 0, x, y, w, h, id, font);
-    if (h) SetWindowTextW(h, text);
-    return h;
+    HWND hwnd = CreateCtrl(parent, WC_BUTTONW, style | WS_TABSTOP, 0, x, y, w, h, id, font);
+    if (hwnd) SetWindowTextW(hwnd, text);
+    return hwnd;
 }
 
 HWND CreateSlider(HWND parent, int x, int y, int w, int h, int id, HFONT font) {
-    HWND h = CreateCtrl(parent, TRACKBAR_CLASSW, TBS_HORZ | TBS_AUTOTICKS, 0,
+    HWND hwnd = CreateCtrl(parent, TRACKBAR_CLASSW, TBS_HORZ | TBS_AUTOTICKS, 0,
                         x, y, w, h, id, font);
-    return h;
+    return hwnd;
 }
 
 void FillCombo(HWND combo, const ComboEntry* entries, int count) {

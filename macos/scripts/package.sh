@@ -37,9 +37,10 @@ echo "=========================================="
 echo ""
 echo "[1/6] 构建输入法二进制..."
 cd "$ROOT_DIR"
-# -Xswiftc -swift-version 5 : 强制使用 Swift 5 语言模式,禁用 Swift 6 严格并发检查
+# -Xswiftc -strict-concurrency=minimal : 禁用 Swift 严格并发检查
 # 避免 @MainActor 类在 Timer/Task 闭包中捕获 self 的并发警告升级为错误
-swift build -c release -Xswiftc -swift-version -Xswiftc 5
+# （CI 的 Xcode 15.4 默认启用严格并发检查,即使 -swift-version 5 也不够）
+swift build -c release -Xswiftc -strict-concurrency=minimal
 
 echo ""
 echo "[2/6] 下载 rime-ice 词库..."

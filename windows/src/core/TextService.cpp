@@ -228,7 +228,7 @@ HRESULT LOTextService::InitActiveLanguageProfileSink() {
     HRESULT hr = m_threadMgr->QueryInterface(IID_ITfSource, (void**)&pSource);
     if (FAILED(hr) || !pSource) return hr;
 
-    hr = pSource->AdviseSink(IID_ITfActiveLanguageProfileNotifySink, this, &m_activeLangProfileCookie);
+    hr = pSource->AdviseSink(IID_ITfActiveLanguageProfileNotifySink, static_cast<ITfActiveLanguageProfileNotifySink*>(this), &m_activeLangProfileCookie);
     pSource->Release();
     return hr;
 }
