@@ -18,6 +18,7 @@
 !define CLSID_STR         "{A8B3C7D2-1E4F-4A6B-9C5D-2E3F7A8B9C0D}"
 !define PROFILE_GUID_STR  "{C1D2E3F4-5A6B-7C8D-9E0F-1A2B3C4D5E6F}"
 !define LANGID_ZH_CN      "0x0804"
+!define TIP_CATEGORY_GUID "{534A48CE-4107-4782-AAF4-CEA7D90254B6}"
 
 ; --- 包含 ---
 !include "MUI2.nsh"
@@ -34,9 +35,8 @@ RequestExecutionLevel admin
 ShowInstDetails show
 SetCompressor /SOLID lzma
 
-; --- 安装目录 ---
+; --- 安装目录（固定，不允许用户选择） ---
 InstallDir "$PROGRAMFILES64\${APP_NAME_EN}"
-InstallDirRegKey HKLM "${APP_REG_KEY}" "InstallDir"
 
 ; --- 版本信息 ---
 VIProductVersion "1.0.0.0"
@@ -51,10 +51,6 @@ VIAddVersionKey "ProductVersion" "${APP_VERSION}"
 ; 界面设置
 ; ============================================================================
 
-; 图标：如需自定义图标，请将 ICO 文件命名为 app.ico 放入本目录，
-; 然后取消下面两行的注释。否则使用 NSIS 默认图标。
-; !define MUI_ICON "app.ico"
-; !define MUI_UNICON "app.ico"
 !define MUI_ABORTWARNING
 !define MUI_ABORTWARNING_TEXT "您确定要退出语境输入法安装吗？"
 
@@ -90,6 +86,9 @@ VIAddVersionKey "ProductVersion" "${APP_VERSION}"
 Section "Install" SecInstall
     SectionIn RO
 
+    ; --- 使用 64 位注册表视图（关键！32 位 NSIS 默认写 WOW6432Node） ---
+    SetRegView 64
+
     ; --- 检查 Windows 版本 ---
     ${IfNot} ${AtLeastWin10}
         MessageBox MB_OK|MB_ICONSTOP "语境输入法需要 Windows 10 或更高版本。"
@@ -101,27 +100,72 @@ Section "Install" SecInstall
 
     ; --- 安装文件 ---
     SetOutPath "$INSTDIR"
-    
+
     ; 主 DLL
     File "..\build\bin\Release\LOInputMethod.dll"
-    
+
     ; librime 运行时依赖
     File "..\build\bin\Release\rime.dll"
-    
+
     ; Rime 配置
     File /r "..\build\bin\Release\rime\*.*"
-    
+
     ; README
     File "README.txt"
 
-    ; --- 注册 COM 组件 ---
-    DetailPrint "注册输入法组件..."
-    ExecWait 'regsvr32 /s "$INSTDIR\LOInputMethod.dll"' $0
-    ${If} $0 != 0
-        DetailPrint "警告：COM 注册返回 $0"
-    ${EndIf}
+    ; ========================================================================
+    ; 注册 COM 组件（直接写注册表，不依赖 regsvr32）
+    ; ========================================================================
+    DetailPrint "注册 COM 组件..."
 
-    ; --- 写入注册表 ---
+    ; HKCR\CLSID\{CLSID}
+    WriteRegStr HKCR "CLSID\${CLSID_STR}" "" "${APP_NAME}"
+    ; HKCR\CLSID\{CLSID}\InprocServer32
+    WriteRegStr HKCR "CLSID\${CLSID_STR}\InprocServer32" "" "$INSTDIR\LOInputMethod.dll"
+    WriteRegStr HKCR "CLSID\${CLSID_STR}\InprocServer32" "ThreadingModel" "Apartment"
+
+    ; ========================================================================
+    ; 注册 TSF 文本服务（机器级，HKLM）
+    ; ========================================================================
+    DetailPrint "注册 TSF 文本服务..."
+
+    ; 文本服务描述
+    WriteRegStr HKLM "SOFTWARE\Microsoft\CTF\TIP\${CLSID_STR}" "" "${APP_NAME}"
+
+    ; 类别注册
+    WriteRegStr HKLM "SOFTWARE\Microsoft\CTF\TIP\${CLSID_STR}\Category\${TIP_CATEGORY_GUID}" "" ""
+
+    ; 语言配置文件
+    WriteRegStr HKLM "SOFTWARE\Microsoft\CTF\TIP\${CLSID_STR}\LanguageProfile\0x0000\${LANGID_ZH_CN}" "" "${PROFILE_GUID_STR}"
+    WriteRegStr HKLM "SOFTWARE\Microsoft\CTF\TIP\${CLSID_STR}\LanguageProfile\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}" "" "${APP_NAME}"
+    WriteRegStr HKLM "SOFTWARE\Microsoft\CTF\TIP\${CLSID_STR}\LanguageProfile\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}" "Description" "${APP_NAME}"
+    WriteRegStr HKLM "SOFTWARE\Microsoft\CTF\TIP\${CLSID_STR}\LanguageProfile\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}" "InputMethod" "${APP_NAME}"
+
+    ; 启用配置文件
+    WriteRegStr HKLM "SOFTWARE\Microsoft\CTF\TIP\${CLSID_STR}\Enable" "${PROFILE_GUID_STR}" ""
+
+    ; 语言栏项目
+    WriteRegStr HKLM "SOFTWARE\Microsoft\CTF\TIP\${CLSID_STR}\LangBar\${PROFILE_GUID_STR}" "" "${APP_NAME}"
+
+    ; ========================================================================
+    ; 注册用户级 TSF 配置（让输入法自动出现在用户输入法列表中）
+    ; CTF\Assemblies 最后一节是 CLSID（不是 Profile GUID）
+    ; ========================================================================
+    DetailPrint "注册用户输入法配置..."
+    WriteRegStr HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${CLSID_STR}" "" "${APP_NAME}"
+    WriteRegStr HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${CLSID_STR}" "CLSID" "${CLSID_STR}"
+    WriteRegStr HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${CLSID_STR}" "Profile" "${PROFILE_GUID_STR}"
+    WriteRegDWORD HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${CLSID_STR}" "KeyboardLayout" 0
+
+    ; ========================================================================
+    ; 也通过 regsvr32 注册（使用 64 位 regsvr32，作为补充）
+    ; 32 位 NSIS 默认调 32 位 regsvr32，无法加载 64 位 DLL
+    ; 用 Sysnative 绕过文件系统重定向，访问真正的 System32
+    ; ========================================================================
+    DetailPrint "通过 regsvr32 补充注册..."
+    ExecWait '"$WINDIR\Sysnative\regsvr32.exe" /s "$INSTDIR\LOInputMethod.dll"' $0
+
+    ; --- 写入安装信息注册表 ---
     WriteRegStr HKLM "${APP_REG_KEY}" "InstallDir" "$INSTDIR"
     WriteRegStr HKLM "${APP_REG_KEY}" "Version" "${APP_VERSION}"
     WriteRegStr HKLM "${APP_REG_KEY}" "DLLPath" "$INSTDIR\LOInputMethod.dll"
@@ -145,23 +189,17 @@ Section "Install" SecInstall
     WriteUninstaller "$INSTDIR\uninstall.exe"
 
     ; --- 开始菜单快捷方式 ---
+    SetShellVarContext all
     CreateDirectory "$SMPROGRAMS\${APP_NAME}"
     CreateShortcut "$SMPROGRAMS\${APP_NAME}\卸载${APP_NAME}.lnk" \
         "$INSTDIR\uninstall.exe"
     CreateShortcut "$SMPROGRAMS\${APP_NAME}\使用说明.lnk" \
         "$INSTDIR\README.txt"
 
-    ; --- 注册用户级 TSF 配置（让输入法自动出现在用户输入法列表中） ---
-    DetailPrint "注册用户输入法配置..."
-    WriteRegStr HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}" "" "${APP_NAME}"
-    WriteRegStr HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}" "CLSID" "${CLSID_STR}"
-    WriteRegStr HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}" "Profile" "${PROFILE_GUID_STR}"
-    WriteRegDWORD HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}" "KeyboardLayout" 0
-
     ; --- 重启 ctfmon 刷新输入法列表 ---
     DetailPrint "刷新系统输入法列表..."
     ExecWait 'taskkill /f /im ctfmon.exe' $0
-    ExecWait 'ctfmon.exe' $0
+    ExecWait '"$WINDIR\System32\ctfmon.exe"' $0
 
     DetailPrint "安装完成"
 SectionEnd
@@ -171,12 +209,15 @@ SectionEnd
 ; ============================================================================
 
 Section "Uninstall"
+    ; --- 使用 64 位注册表视图 ---
+    SetRegView 64
+
     ; --- 关闭进程 ---
     Call un.KillRunningProcess
 
-    ; --- 注销 COM ---
+    ; --- 通过 64 位 regsvr32 注销 ---
     DetailPrint "注销输入法组件..."
-    ExecWait 'regsvr32 /u /s "$INSTDIR\LOInputMethod.dll"' $0
+    ExecWait '"$WINDIR\Sysnative\regsvr32.exe" /u /s "$INSTDIR\LOInputMethod.dll"' $0
 
     ; --- 删除文件 ---
     Delete "$INSTDIR\LOInputMethod.dll"
@@ -187,17 +228,25 @@ Section "Uninstall"
     RMDir "$INSTDIR"
 
     ; --- 删除快捷方式 ---
+    SetShellVarContext all
     RMDir /r "$SMPROGRAMS\${APP_NAME}"
 
-    ; --- 清理注册表 ---
+    ; --- 清理安装信息注册表 ---
     DeleteRegKey HKLM "${APP_UNINST_KEY}"
     DeleteRegKey HKLM "${APP_REG_KEY}"
 
-    ; --- 清理 TSF 注册 ---
+    ; --- 清理 COM 注册 ---
+    DeleteRegKey HKCR "CLSID\${CLSID_STR}"
+
+    ; --- 清理 TSF 机器级注册 ---
     DeleteRegKey HKLM "SOFTWARE\Microsoft\CTF\TIP\${CLSID_STR}"
 
     ; --- 清理用户级 TSF 配置 ---
-    DeleteRegKey HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}"
+    DeleteRegKey HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${CLSID_STR}"
+
+    ; --- 重启 ctfmon ---
+    ExecWait 'taskkill /f /im ctfmon.exe' $0
+    ExecWait '"$WINDIR\System32\ctfmon.exe"' $0
 
     DetailPrint "卸载完成"
 SectionEnd
@@ -207,7 +256,6 @@ SectionEnd
 ; ============================================================================
 
 Function KillRunningProcess
-    ; 尝试关闭可能使用中的输入法进程（TSF 进程通常在 explorer/ctfmon 中）
     ExecWait 'taskkill /f /im LOInputMethod.dll' $0
 FunctionEnd
 
