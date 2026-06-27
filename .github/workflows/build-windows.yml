@@ -175,6 +175,7 @@ jobs:
       - name: Build NSIS installer
         shell: cmd
         run: |
+          if not exist windows\dist mkdir windows\dist
           cd windows\installer
           set NSIS_EXE=
           where makensis >nul 2>nul && set NSIS_EXE=makensis
