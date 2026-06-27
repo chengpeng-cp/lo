@@ -345,10 +345,15 @@ gh run view <run-id> --log-failed
 
 **Windows workflow：**
 1. 在 `windows-latest` runner 上运行
-2. 用 vcpkg 安装 librime
+2. 从 librime 官方 GitHub Release 下载 MSVC x64 预编译包（避免 vcpkg 没有 librime port 的问题）
 3. 用 CMake + MSVC 编译 DLL
 4. 用 NSIS 生成 `.exe` 安装包
 5. 上传 artifact / 发布 Release
+
+**librime 依赖说明：**
+- Windows CI：从 `https://github.com/rime/librime/releases` 下载 MSVC 预编译包（当前版本 1.17.0）
+- 本地 Windows 构建：运行 `scripts/build.bat` 会自动下载 librime,无需 vcpkg
+- macOS CI：用 Homebrew 安装 librime
 
 ---
 

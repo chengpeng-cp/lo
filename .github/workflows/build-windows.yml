@@ -34,6 +34,11 @@ on:
 permissions:
   contents: write   # 发布 Release 需要
 
+# librime 版本（从官方 release 下载 MSVC 预编译包）
+env:
+  RIME_VERSION: '1.17.0'
+  RIME_ASSET: 'rime-33e7814-Windows-msvc-x64.7z'
+
 jobs:
   build:
     runs-on: windows-latest
@@ -47,11 +52,39 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Install librime via vcpkg
-        run: vcpkg install librime:x64-windows
-
       - name: Install NSIS
         run: choco install nsis -y --no-progress
+
+      - name: Install 7zip (for extracting .7z)
+        run: choco install 7zip -y --no-progress
+
+      - name: Download and extract librime (MSVC x64 prebuilt)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = "https://github.com/rime/librime/releases/download/${{ env.RIME_VERSION }}/${{ env.RIME_ASSET }}"
+          Write-Host "下载 librime: $url"
+          Invoke-WebRequest -Uri $url -OutFile "librime.7z"
+
+          # 解压到 third_party/librime
+          $rimeRoot = "windows/third_party/librime"
+          New-Item -ItemType Directory -Force -Path $rimeRoot | Out-Null
+          7z x librime.7z -o"$rimeRoot" -y
+
+          # 列出解压内容,确认结构
+          Write-Host "librime 解压内容:"
+          Get-ChildItem -Recurse $rimeRoot | Select-Object FullName
+
+          # 官方包结构为 dist/include, dist/lib, dist/bin
+          # 调整为 CMakeLists.txt 期望的结构: include/, lib/, bin/
+          $distDir = Join-Path $rimeRoot "dist"
+          if (Test-Path $distDir) {
+            Move-Item -Path (Join-Path $distDir "*") -Destination $rimeRoot -Force
+            Remove-Item -Path $distDir -Recurse -Force
+          }
+
+          Write-Host "调整后的 librime 目录:"
+          Get-ChildItem -Recurse $rimeRoot -Depth 1 | Select-Object FullName
 
       - name: Download rime-ice dict
         shell: bash
@@ -78,14 +111,29 @@ jobs:
         run: |
           cd windows
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release ^
-            -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake ^
-            -DVCPKG_TARGET_TRIPLET=x64-windows
+            -DRIME_ROOT="%CD%\third_party\librime"
 
       - name: Build
         shell: cmd
         run: |
           cd windows
           cmake --build build --config Release --parallel
+
+      - name: Copy rime.dll to output
+        shell: pwsh
+        run: |
+          $dllSrc = "windows\third_party\librime\bin\rime.dll"
+          $dllDst = "windows\build\bin\Release\rime.dll"
+          if (Test-Path $dllSrc) {
+            Copy-Item $dllSrc $dllDst -Force
+            Write-Host "已复制 rime.dll 到输出目录"
+          } else {
+            Write-Host "警告：未找到 rime.dll,搜索其他位置..."
+            Get-ChildItem -Path windows\third_party -Recurse -Filter "rime.dll" | ForEach-Object {
+              Write-Host "  找到: $($_.FullName)"
+              Copy-Item $_.FullName $dllDst -Force
+            }
+          }
 
       - name: Prepare package resources
         shell: cmd
