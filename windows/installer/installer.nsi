@@ -4,7 +4,7 @@
 ; 用法：
 ;   makensis installer.nsi
 ;
-; 生成：dist/语境输入法-Setup-1.0.0.exe
+; 生成：dist/LOInputMethod-Setup-1.0.0.exe
 ; 用户双击即可一键安装，安装后自动注册 TSF 输入法
 ; ============================================================================
 
@@ -16,6 +16,8 @@
 !define APP_REG_KEY       "Software\LOInputMethod"
 !define APP_UNINST_KEY    "Software\Microsoft\Windows\CurrentVersion\Uninstall\LOInputMethod"
 !define CLSID_STR         "{A8B3C7D2-1E4F-4A6B-9C5D-2E3F7A8B9C0D}"
+!define PROFILE_GUID_STR  "{C1D2E3F4-5A6B-7C8D-9E0F-1A2B3C4D5E6F}"
+!define LANGID_ZH_CN      "0x0804"
 
 ; --- 包含 ---
 !include "MUI2.nsh"
@@ -60,21 +62,14 @@ VIAddVersionKey "ProductVersion" "${APP_VERSION}"
 !define MUI_WELCOMEPAGE_TITLE "欢迎使用 ${APP_NAME} 安装向导"
 !define MUI_WELCOMEPAGE_TEXT "本向导将引导您完成 ${APP_NAME} 的安装。\n\n${APP_NAME} 是一款边写边翻译的智能输入法，支持多种翻译引擎和语言。\n\n点击「下一步」继续。"
 
-; 安装目录页
-!define MUI_DIRECTORYPAGE_TEXT_TOP "选择安装目录"
-
 ; 完成页
 !define MUI_FINISHPAGE_TITLE "${APP_NAME} 安装完成"
-!define MUI_FINISHPAGE_TEXT "${APP_NAME} 已成功安装到您的计算机。\n\n您可以在系统设置 > 语言和时间中添加语境输入法。"
+!define MUI_FINISHPAGE_TEXT "${APP_NAME} 已成功安装并已设为可用输入法。\n\n按 Win+Space 即可切换到语境输入法开始使用。"
 !define MUI_FINISHPAGE_RUN_TEXT "查看使用说明"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\README.txt"
-!define MUI_FINISHPAGE_SHOWREADME_TEXT "立即打开系统语言设置"
-!define MUI_FINISHPAGE_SHOWREADME "$WINDIR\System32\control.exe"
-!define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
 
-; --- 页面 ---
+; --- 页面（不显示目录选择页，固定安装路径） ---
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 
@@ -156,9 +151,17 @@ Section "Install" SecInstall
     CreateShortcut "$SMPROGRAMS\${APP_NAME}\使用说明.lnk" \
         "$INSTDIR\README.txt"
 
-    ; --- 通知 TSF 刷新 ---
-    DetailPrint "通知系统刷新输入法列表..."
-    ExecWait 'rundll32.exe "$INSTDIR\LOInputMethod.dll",DllRegisterServer' $0
+    ; --- 注册用户级 TSF 配置（让输入法自动出现在用户输入法列表中） ---
+    DetailPrint "注册用户输入法配置..."
+    WriteRegStr HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}" "" "${APP_NAME}"
+    WriteRegStr HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}" "CLSID" "${CLSID_STR}"
+    WriteRegStr HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}" "Profile" "${PROFILE_GUID_STR}"
+    WriteRegDWORD HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}" "KeyboardLayout" 0
+
+    ; --- 重启 ctfmon 刷新输入法列表 ---
+    DetailPrint "刷新系统输入法列表..."
+    ExecWait 'taskkill /f /im ctfmon.exe' $0
+    ExecWait 'ctfmon.exe' $0
 
     DetailPrint "安装完成"
 SectionEnd
@@ -192,6 +195,9 @@ Section "Uninstall"
 
     ; --- 清理 TSF 注册 ---
     DeleteRegKey HKLM "SOFTWARE\Microsoft\CTF\TIP\${CLSID_STR}"
+
+    ; --- 清理用户级 TSF 配置 ---
+    DeleteRegKey HKCU "SOFTWARE\Microsoft\CTF\Assemblies\0x0000\${LANGID_ZH_CN}\${PROFILE_GUID_STR}"
 
     DetailPrint "卸载完成"
 SectionEnd
