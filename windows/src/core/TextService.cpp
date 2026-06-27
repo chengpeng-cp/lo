@@ -13,7 +13,6 @@
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "oleaut32.lib")
-#pragma comment(lib, "msctf.lib")
 #pragma comment(lib, "uuid.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "shell32.lib")
