@@ -113,9 +113,7 @@ jobs:
 
             1. 下载 `LOInputMethod-Setup-${{ steps.ver.outputs.version }}.exe`
             2. 双击运行,按提示完成安装
-            3. 打开「系统设置 > 时间和语言 > 语言和区域」
-            4. 在「中文（简体）> 语言选项 > 键盘」中添加「语境输入法」
-            5. 使用 Win+Space 切换到语境输入法
+            3. 安装完成后,使用 Win+Space 切换到语境输入法即可
 
             **系统要求**：Windows 10 1809+ 或 Windows 11,64 位系统
 
