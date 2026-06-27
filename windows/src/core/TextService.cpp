@@ -218,7 +218,7 @@ HRESULT LOTextService::InitThreadFocusSink() {
     HRESULT hr = m_threadMgr->QueryInterface(IID_ITfSource, (void**)&pSource);
     if (FAILED(hr) || !pSource) return hr;
 
-    hr = pSource->AdviseSink(IID_ITfThreadFocusSink, this, &m_threadFocusSinkCookie);
+    hr = pSource->AdviseSink(IID_ITfThreadFocusSink, static_cast<ITfThreadFocusSink*>(this), &m_threadFocusSinkCookie);
     pSource->Release();
     return hr;
 }
@@ -476,7 +476,9 @@ HRESULT LOTextService::BeginComposition(ITfContext* pContext) {
         pRange = selection.range;
     }
 
-    hr = pContextComposition->StartCompositionSimple(m_editCookie, 0, this, &m_composition);
+    if (pRange) pRange->AddRef();
+
+    hr = pContextComposition->StartComposition(m_editCookie, pRange, this, &m_composition);
     pContextComposition->Release();
 
     if (pRange) pRange->Release();
