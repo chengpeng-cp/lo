@@ -176,7 +176,15 @@ jobs:
         shell: cmd
         run: |
           cd windows\installer
-          makensis installer.nsi
+          set NSIS_EXE=
+          where makensis >nul 2>nul && set NSIS_EXE=makensis
+          if not defined NSIS_EXE if exist "%ProgramFiles(x86)%\NSIS\makensis.exe" set NSIS_EXE="%ProgramFiles(x86)%\NSIS\makensis.exe"
+          if not defined NSIS_EXE if exist "%ProgramFiles%\NSIS\makensis.exe" set NSIS_EXE="%ProgramFiles%\NSIS\makensis.exe"
+          if not defined NSIS_EXE (
+            echo 错误：未找到 NSIS
+            exit /b 1
+          )
+          %NSIS_EXE% installer.nsi
 
       - name: Rename installer with version
         shell: bash
