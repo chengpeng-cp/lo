@@ -81,11 +81,12 @@ target_include_directories(LOInputMethod PRIVATE
 )
 
 # --- 链接库（Win32 系统库）---
+# 注意: msctf 等系统库通过源代码中的 #pragma comment(lib, "xxx.lib") 链接
+# 这样 MSVC 编译器会自动在 Windows SDK 路径中查找
 target_link_libraries(LOInputMethod PRIVATE
     ole32
     oleaut32
     uuid
-    msctf
     shlwapi
     shell32
     shlobj
