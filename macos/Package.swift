@@ -1,4 +1,4 @@
-// swift-tools-version: 5.10
+// swift-tools-version: 5.9
 
 import PackageDescription
 
@@ -39,13 +39,13 @@ let package = Package(
             cSettings: [
                 .unsafeFlags(["-I/opt/homebrew/include"])
             ],
+            swiftSettings: [
+                // 显式指定 Swift 5 语言模式,避免 Xcode 16+ 默认启用严格并发检查
+                // 导致 @MainActor 类在 Timer/Task 闭包中的捕获报错
+                .unsafeFlags(["-swift-version", "5"])
+            ],
             linkerSettings: [
                 .unsafeFlags(["-L/opt/homebrew/lib", "-lrime"])
-            ],
-            // 显式指定 Swift 5 语言模式,避免 Xcode 16+ 默认启用严格并发检查
-            // 导致 @MainActor 类在 Timer/Task 闭包中的捕获报错
-            swiftSettings: [
-                .swiftLanguageMode(.v5)
             ]
         )
     ]
