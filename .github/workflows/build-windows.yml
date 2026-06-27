@@ -109,6 +109,8 @@ jobs:
       - name: Configure CMake
         shell: cmd
         run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.Component.MSBuild -property installationPath`) do set VSINSTALL=%%i
+          call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat"
           cd windows
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release ^
             -DRIME_ROOT="%CD%\third_party\librime"
@@ -116,6 +118,8 @@ jobs:
       - name: Build
         shell: cmd
         run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.Component.MSBuild -property installationPath`) do set VSINSTALL=%%i
+          call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat"
           cd windows
           cmake --build build --config Release --parallel
 
