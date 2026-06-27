@@ -261,8 +261,9 @@ class TranslationScheduler {
             withTimeInterval: segmentPauseThreshold,
             repeats: false
         ) { [weak self] _ in
+            guard let self = self else { return }
             Task { @MainActor in
-                self?.endSegment()
+                self.endSegment()
             }
         }
     }
