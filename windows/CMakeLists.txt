@@ -80,23 +80,10 @@ target_include_directories(LOInputMethod PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/settings
 )
 
-# --- 链接库（Win32 系统库）---
-# 注意: msctf 等系统库通过源代码中的 #pragma comment(lib, "xxx.lib") 链接
-# 这样 MSVC 编译器会自动在 Windows SDK 路径中查找
-target_link_libraries(LOInputMethod PRIVATE
-    ole32
-    oleaut32
-    uuid
-    shlwapi
-    shell32
-    shlobj
-    crypt32
-    winhttp
-    comctl32
-    gdi32
-    user32
-    advapi32
-)
+# --- 链接库 ---
+# Windows 系统库通过源代码中的 #pragma comment(lib, "xxx.lib") 链接
+# 这样 MSVC 编译器会自动在 Windows SDK 路径中查找,避免 CMake 传递的路径不正确
+# 仅保留 librime 的链接逻辑（见下方）
 
 # --- 查找 librime ---
 # 方式1: vcpkg（推荐）- 在 vcpkg 中安装 librime 后自动找到
