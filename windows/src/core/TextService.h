@@ -105,8 +105,9 @@ private:
     std::shared_ptr<LORimeEngine> m_rimeEngine;
     std::unique_ptr<LORimeSessionManager> m_sessionManager;
     std::unique_ptr<LOCandidateWindow> m_candidateWindow;
-    std::unique_ptr<LOTranslationOverlay> m_translationOverlay;
-    std::unique_ptr<LOTranslationScheduler> m_translationScheduler;
+    // 以下两个是单例引用,不负责释放
+    LOTranslationOverlay* m_translationOverlay = nullptr;
+    LOTranslationScheduler* m_translationScheduler = nullptr;
 
     // --- 当前上下文 ---
     ITfContext* m_currentContext;

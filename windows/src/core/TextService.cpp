@@ -112,8 +112,9 @@ STDMETHODIMP LOTextService::Deactivate() {
     }
 
     m_candidateWindow.reset();
-    m_translationOverlay.reset();
-    m_translationScheduler.reset();
+    // 单例不释放,仅断开引用
+    m_translationOverlay = nullptr;
+    m_translationScheduler = nullptr;
     m_sessionManager.reset();
 
     if (m_rimeEngine) {
@@ -153,13 +154,11 @@ STDMETHODIMP LOTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfCl
     };
 
     // 3. 创建翻译悬浮窗（单例，触发首次访问以绑定到 UI 线程）
-    m_translationOverlay = std::unique_ptr<LOTranslationOverlay>(&LOTranslationOverlay::Shared(),
-        [](LOTranslationOverlay*) {}); // 不释放单例
+    m_translationOverlay = &LOTranslationOverlay::Shared();
     m_translationOverlay->UpdateConfig();
 
     // 4. 创建翻译调度器并连接回调
-    m_translationScheduler = std::unique_ptr<LOTranslationScheduler>(&LOTranslationScheduler::Shared(),
-        [](LOTranslationScheduler*) {});
+    m_translationScheduler = &LOTranslationScheduler::Shared();
     m_translationScheduler->onOriginalUpdate = [](const std::wstring& text) {
         LOTranslationOverlay::Shared().SilentUpdateOriginal(text);
     };
