@@ -29,7 +29,7 @@ OutFile "..\dist\${APP_NAME}-Setup-${APP_VERSION}.exe"
 Unicode True
 RequestExecutionLevel admin
 ShowInstDetails show
-SetCompressor /SOLID lzma2
+SetCompressor /SOLID lzma
 
 ; --- 安装目录 ---
 InstallDir "$PROGRAMFILES64\${APP_NAME_EN}"
