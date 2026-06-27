@@ -22,6 +22,7 @@
 !include "LogicLib.nsh"
 !include "x64.nsh"
 !include "WinVer.nsh"
+!include "FileFunc.nsh"
 
 ; --- 基本配置 ---
 Name "${APP_NAME}"
