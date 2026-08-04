@@ -1,18 +1,28 @@
-# 构建产物
+# ===== 构建产物 =====
 macos/.build/
 macos/.swiftpm/
 macos/Package.resolved
+macos/dist/
+windows/dist/
 
-# rime-ice 社区词库由 scripts/fetch-dict.sh 按需下载，不提交进仓库
+# ===== rime 词库（按需下载，不入库）=====
 macos/LOInputMethod/Resources/rime/cn_dicts/
-macos/LOInputMethod/Resources/rime/cn_dicts/
+windows/resources/rime/cn_dicts/
 
-# 旧版繁体词典备份（本地保留参考，不入库）
+# ===== 旧版繁体词典备份（本地保留参考，不入库）=====
 macos/LOInputMethod/Resources/rime/luna_pinyin.dict.yaml.legacy
+windows/resources/rime/luna_pinyin.dict.yaml.legacy
 
-# macOS
-macos/.DS_Store
+# ===== 私密文档/脚手架（本地保留，不入库）=====
+.trae/
+docs/
+front/
+skills/
 
-# 日志（软链接到 ~/Library/Logs/LOInputMethod/translation.log）
+# ===== 日志（软链接到 ~/Library/Logs/LOInputMethod/translation.log）=====
 log/
 todolist.md
+
+# ===== 系统文件 =====
+.DS_Store
+**/.DS_Store
