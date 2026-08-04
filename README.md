@@ -176,7 +176,7 @@ makensis installer.nsi
 
 ## 📄 许可证
 
-> ⚠️ **注意**：当前仓库尚未添加 LICENSE 文件。在添加许可证前，代码默认受版权保护。
+本项目基于 [MIT License](LICENSE) 开源，可自由使用、修改和分发。
 
 项目输入引擎基于 [Rime（中州韻輸入法引擎）](https://github.com/rime/librime)（BSD 许可），默认词库使用 [rime-ice](https://github.com/iDvel/rime-ice)，使用和二次分发时请遵守相应许可条款。
 
