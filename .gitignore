@@ -18,6 +18,26 @@ windows/resources/rime/luna_pinyin.dict.yaml.legacy
 docs/
 front/
 skills/
+/personal-docs/
+/.rewrite-backup-*/
+
+# ===== 本机配置与敏感凭据 =====
+.env
+.env.*
+!.env.example
+*.local
+*.local.*
+secrets.*
+credentials.*
+*_secrets.*
+*_credentials.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+id_rsa
+id_ed25519
 
 # ===== 日志（软链接到 ~/Library/Logs/LOInputMethod/translation.log）=====
 log/

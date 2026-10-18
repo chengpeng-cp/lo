@@ -2,6 +2,15 @@
 
 > 边写边翻译的智能输入法 —— 打字的同时，悬浮窗实时显示翻译结果，无需切换应用。
 
+<div align="center">
+  <p><strong>课程与交流</strong></p>
+  <p><a href="https://space.bilibili.com/481791559">B 站课程与动态：语境输入法作者空间</a></p>
+  <p>微信交流：</p>
+  <img src="assets/images/vx.png" width="180" alt="微信二维码" />
+</div>
+
+> 本项目是 macOS 与 Windows 原生输入法，不是前后端分离的网站项目；无需启动后端服务。克隆后可按下方步骤构建并在对应系统中体验。
+
 [![macOS Build](https://github.com/chengpeng-cp/lo/actions/workflows/build-macos.yml/badge.svg)](https://github.com/chengpeng-cp/lo/actions/workflows/build-macos.yml)
 [![Windows Build](https://github.com/chengpeng-cp/lo/actions/workflows/build-windows.yml/badge.svg)](https://github.com/chengpeng-cp/lo/actions/workflows/build-windows.yml)
 
@@ -74,6 +83,58 @@ API Key 存储在系统密钥链中，不会上传到任何第三方服务器，
 
 ## 🏗️ 从源码构建
 
+### 技术栈
+
+| 平台 | 技术 | 主要依赖 |
+|------|------|----------|
+| macOS | Swift 5.9+、Swift Package Manager、AppKit / IMKit | librime（Homebrew） |
+| Windows | C++17、CMake、Windows TSF | Visual Studio / MSVC、Windows SDK、librime |
+
+项目没有 Web 前端、后端 API 服务或数据库。翻译功能由桌面客户端直接连接用户选择的翻译服务；大模型翻译需要用户在应用设置中填写自己的 API Key。
+
+### 快速体验
+
+如果只想使用输入法，前往 [GitHub Releases](https://github.com/chengpeng-cp/lo/releases) 下载对应系统的安装包，按「下载安装」部分完成安装即可。
+
+如果要从源码构建，请在目标操作系统上按以下步骤操作。首次构建会下载 librime 依赖和 Rime 社区词库，因此需要网络连接。
+
+#### macOS：克隆并安装运行
+
+要求 macOS 13 或更高版本、Xcode Command Line Tools（含 Swift 5.9+）和 Homebrew。
+
+```bash
+git clone https://github.com/chengpeng-cp/lo.git
+cd lo/macos
+brew install librime
+make install-full
+```
+
+安装完成后，前往「系统设置 → 键盘 → 输入法」添加「语境输入法」，然后用 `Ctrl + Space` 切换。`make install-full` 会构建程序、下载词库并将完整应用安装到当前用户的输入法目录。
+
+需要制作 DMG 安装包时，在 `macos/` 目录运行：
+
+```bash
+make package
+```
+
+#### Windows：克隆并构建
+
+要求 64 位 Windows 10 或更高版本、Visual Studio 2019+（含 MSVC 与 Windows SDK）、CMake 和 7-Zip。构建脚本会下载 librime 预编译依赖和 Rime 社区词库。
+
+```bat
+git clone https://github.com/chengpeng-cp/lo.git
+cd lo\windows
+scripts\build.bat Release
+```
+
+构建 DLL 位于 `windows\build\bin\Release\`。要生成可安装的 EXE，还需安装 [NSIS](https://nsis.sourceforge.io/) 并确保 `makensis` 在 PATH 中，然后运行：
+
+```bat
+scripts\package.bat Release
+```
+
+安装包生成在 `windows\dist\`。运行安装程序后，在系统输入法设置中启用「语境输入法」，再按 `Win + Space` 切换。
+
 ### 目录结构
 
 ```
@@ -95,10 +156,11 @@ lo/
 │   ├── installer/             # NSIS 安装脚本
 │   ├── resources/rime/        # Rime 方案配置
 │   └── CMakeLists.txt
+├── assets/images/vx.png       # README 中的微信二维码
 └── .github/workflows/         # CI 构建（GitHub Actions）
 ```
 
-### macOS 构建
+#### macOS 构建命令
 
 **依赖**：
 - Xcode 15+（含 Swift 5.9+）
@@ -120,7 +182,7 @@ make package      # 或 bash scripts/package.sh
 # 产物：macos/dist/语境输入法-<version>.dmg
 ```
 
-### Windows 构建
+#### Windows 构建命令
 
 **依赖**：
 - Visual Studio 2019+（带 MSVC、CMake、Windows SDK 10.0+）
@@ -157,10 +219,10 @@ makensis installer.nsi
 
 推送 `v*` tag（如 `v1.0.4`）时，CI 会自动创建 GitHub Release 并上传安装包。手动触发也支持：在 Actions 页面点击 "Run workflow" 即可。
 
-## 🔒 隐私说明
+## 🔒 隐私与密钥存储
 
 - 翻译请求**直连**所选的翻译服务（Bing / DeepSeek / OpenAI 等），不经过任何中间服务器
-- API Key 存储在系统密钥管理中（macOS Keychain / Windows Credential Manager）
+- API Key 存储在本机安全存储中（macOS Keychain / Windows DPAPI 加密文件，位于当前用户的 `%LOCALAPPDATA%\LOInputMethod\apikeys.dat`）
 - 默认 Bing 翻译使用微软 Edge 浏览器同款公开接口，无需注册、无账户关联
 - 不收集任何使用数据、不联网上报、不嵌入第三方统计 SDK
 - 输入法作为本地进程运行，所有输入内容仅在本地处理和直接发送到用户所选翻译 API
@@ -172,7 +234,7 @@ makensis installer.nsi
 1. macOS 代码使用 Swift，遵循 Swift API Design Guidelines；Windows 代码使用 C++17
 2. 双平台功能尽量保持对齐（新增翻译后端需同时实现 Swift 和 C++ 版本）
 3. 提交前请确保本地构建通过（`make package` / `cmake --build`）
-4. 敏感信息（API Key、个人配置等）请勿提交
+4. 敏感信息（API Key、个人配置等）请勿提交；本仓库通过 `.gitignore` 排除 `.env`、本地凭据文件和 `personal-docs/` 等个人内容
 
 ## 📄 许可证
 
