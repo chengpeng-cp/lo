@@ -98,6 +98,18 @@ struct InputCoreRegression {
         let uppercaseHandled = engine.processKey(RimeEngine.convertKeyCode(0, chars: "A"), modifiers: 1, session: engineSession)
         check(!uppercaseHandled && engine.getCommit(session: engineSession) == nil,
             "English uppercase passes through to the client without conversion")
+        engine.setAsciiMode(false, session: engineSession)
+        _ = engine.processKey(Int32(",".utf8.first!), modifiers: 0, session: engineSession)
+        check(engine.getCommit(session: engineSession) == "，",
+            "Comma on an empty document line commits Chinese punctuation")
+        for scalar in "nihao".unicodeScalars {
+            _ = engine.processKey(Int32(scalar.value), modifiers: 0, session: engineSession)
+        }
+        _ = engine.processKey(32, modifiers: 0, session: engineSession)
+        check(engine.getCommit(session: engineSession) == "你好", "Chinese composition commits before punctuation")
+        _ = engine.processKey(Int32(",".utf8.first!), modifiers: 0, session: engineSession)
+        check(engine.getCommit(session: engineSession) == "，",
+            "Comma immediately after committed Chinese is preserved")
         engine.destroySession(engineSession)
         if CommandLine.arguments.contains("--engine-only") {
             print("Input engine regression: \(passed) checks passed")
@@ -106,6 +118,16 @@ struct InputCoreRegression {
         print("Initializing AppKit candidate UI and Shift state checks")
         _ = NSApplication.shared
         let client = MockInputClient()
+        let noMarkedText = NSRange(location: NSNotFound, length: 0)
+        let collapsedSelection = NSRange(location: 0, length: 0)
+        check(LOTextInsertion.replacementRange(markedRange: noMarkedText, selectedRange: collapsedSelection) == collapsedSelection,
+            "Unmarked commits target the insertion point instead of NSNotFound")
+        let activeMarkedRange = NSRange(location: 4, length: 3)
+        check(LOTextInsertion.replacementRange(markedRange: activeMarkedRange, selectedRange: collapsedSelection) == activeMarkedRange,
+            "Composition commits replace the active marked range")
+        client.insertText("，", replacementRange: LOTextInsertion.replacementRange(
+            markedRange: noMarkedText, selectedRange: client.selectedRange()))
+        check(client.text == "，", "A leading punctuation commit inserts into an empty client")
         var tracker = LOShiftTapTracker()
         func flags(_ modifiers: NSEvent.ModifierFlags, at time: TimeInterval, keyCode: UInt16 = 56) -> NSEvent {
             NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: modifiers,

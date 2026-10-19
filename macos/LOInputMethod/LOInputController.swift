@@ -77,6 +77,14 @@ struct LOShiftTapTracker {
     }
 }
 
+/// IMK clients do not all treat NSNotFound identically for insertText.
+/// Replace the active marked text when composing, otherwise use the document selection.
+enum LOTextInsertion {
+    static func replacementRange(markedRange: NSRange, selectedRange: NSRange) -> NSRange {
+        markedRange.location == NSNotFound ? selectedRange : markedRange
+    }
+}
+
 // MARK: - 输入控制器
 
 /// 语境输入法控制器，处理按键输入和候选词显示
@@ -207,9 +215,12 @@ class LOInputController: IMKInputController {
             debugLog("commitRawPreedit: raw input 为空")
             return
         }
-        let markedRange = textInput.markedRange()
+        let replacementRange = LOTextInsertion.replacementRange(
+            markedRange: textInput.markedRange(),
+            selectedRange: textInput.selectedRange()
+        )
         // 用 raw input 直接替换 marked text 区域，避免音节分隔空格，也避免先清空再插入导致的丢失。
-        textInput.insertText(rawInput, replacementRange: markedRange)
+        textInput.insertText(rawInput, replacementRange: replacementRange)
         rimeEngine.clearComposition(session: currentSession)
         candidateWindow.hide()
     }
@@ -294,7 +305,11 @@ class LOInputController: IMKInputController {
     }
 
     private func insertCommit(_ text: String, to textInput: IMKTextInput) {
-        textInput.insertText(text, replacementRange: textInput.markedRange())
+        let replacementRange = LOTextInsertion.replacementRange(
+            markedRange: textInput.markedRange(),
+            selectedRange: textInput.selectedRange()
+        )
+        textInput.insertText(text, replacementRange: replacementRange)
         Task { @MainActor in
             TranslationScheduler.shared.commit(text: text)
         }
@@ -426,14 +441,7 @@ class LOInputController: IMKInputController {
         if let commitText = rimeEngine.getCommit(session: currentSession) {
             // 将提交文本发送给客户端
             if let textInput = client as? IMKTextInput {
-                textInput.insertText(commitText, replacementRange: textInput.markedRange())
-            }
-
-            // 提交文本交给翻译调度器（防抖累积 + 中文过滤 + 翻译请求）
-            // 调度器会在防抖期间静默更新悬浮窗原文，1 秒无新输入后触发翻译
-            let commitTextCopy = commitText
-            Task { @MainActor in
-                TranslationScheduler.shared.commit(text: commitTextCopy)
+                insertCommit(commitText, to: textInput)
             }
         } else if !handled {
             // Rime 未处理该按键（handled=false），系统会直接把字符插入客户端。
@@ -483,10 +491,14 @@ class LOInputController: IMKInputController {
                 ]
                 let attributedPreedit = NSAttributedString(string: preedit, attributes: attributes)
                 let cursor = preedit.utf16.count
+                let replacementRange = LOTextInsertion.replacementRange(
+                    markedRange: textInput.markedRange(),
+                    selectedRange: textInput.selectedRange()
+                )
                 textInput.setMarkedText(
                     attributedPreedit,
                     selectionRange: NSRange(location: cursor, length: 0),
-                    replacementRange: NSRange(location: NSNotFound, length: 0)
+                    replacementRange: replacementRange
                 )
             }
 
@@ -504,11 +516,14 @@ class LOInputController: IMKInputController {
         } else {
             // 不在组合状态：清除预编辑文本，隐藏候选词窗口
             if let textInput = client as? IMKTextInput {
-                textInput.setMarkedText(
-                    "",
-                    selectionRange: NSRange(location: 0, length: 0),
-                    replacementRange: NSRange(location: NSNotFound, length: 0)
-                )
+                let markedRange = textInput.markedRange()
+                if markedRange.location != NSNotFound {
+                    textInput.setMarkedText(
+                        "",
+                        selectionRange: NSRange(location: 0, length: 0),
+                        replacementRange: markedRange
+                    )
+                }
             }
             candidateWindow.hide()
         }
@@ -583,12 +598,7 @@ class LOInputController: IMKInputController {
         if let commitText = rimeEngine.getCommit(session: currentSession) {
             // 提交文本到客户端
             if let textInput = client() as IMKTextInput? {
-                textInput.insertText(commitText, replacementRange: textInput.markedRange())
-            }
-            // 提交给翻译调度器，与空格提交走同一路径，确保累积前面内容
-            let commitTextCopy = commitText
-            Task { @MainActor in
-                TranslationScheduler.shared.commit(text: commitTextCopy)
+                insertCommit(commitText, to: textInput)
             }
         }
 

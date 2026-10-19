@@ -14,6 +14,7 @@ enum InstallerScripts {
         payload=\(shellQuote(payload))
         target=\(shellQuote(target))
         user_bundle=\(shellQuote(userBundle))
+        lsregister='/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister'
         staging=\(shellQuote(target + ".install-" + suffix))
         backup=\(shellQuote(target + ".backup-" + suffix))
         installed=0
@@ -29,6 +30,10 @@ enum InstallerScripts {
             exit "$status"
         }
         trap cleanup EXIT
+        # Remove stale LaunchServices entries created by older installers while
+        # running as root. The replacement is registered later in the user's session.
+        "$lsregister" -u "$target" 2>/dev/null || true
+        "$lsregister" -u "$user_bundle" 2>/dev/null || true
         /bin/mkdir -p "$(/usr/bin/dirname "$target")"
         /usr/bin/ditto "$payload" "$staging"
         /usr/bin/codesign --verify --deep --strict "$staging"

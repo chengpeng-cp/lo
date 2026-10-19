@@ -31,4 +31,6 @@ mv "$WORK/new.app" "$TARGET"
 INSTALLED=1
 codesign --verify --deep --strict "$TARGET"
 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "$TARGET"
+killall TextInputMenuAgent 2>/dev/null || true
+open "$TARGET"
 echo "Installed $TARGET. Enable it in System Settings > Keyboard > Input Sources."

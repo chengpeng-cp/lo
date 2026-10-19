@@ -6,6 +6,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.lo.inputmethod.ime</string>
 
+    <key>TISInputSourceID</key>
+    <string>com.lo.inputmethod.ime</string>
+
     <key>CFBundleExecutable</key>
     <string>LOInputMethod</string>
 
@@ -34,7 +37,13 @@
     <string>6.0</string>
 
     <key>CFBundleDevelopmentRegion</key>
-    <string>zh_CN</string>
+    <string>zh-Hans</string>
+
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>zh-Hans</string>
+        <string>en</string>
+    </array>
 
     <key>LSHasLocalizedDisplayName</key>
     <true/>
@@ -95,14 +104,6 @@
                 <string>com.lo.inputmethod.ime.pinyin</string>
                 <key>TISIntendedLanguage</key>
                 <string>zh-Hans</string>
-                <key>tsInputModeNameKey</key>
-                <string>语境输入法</string>
-                <key>tsInputModeMenuTextKey</key>
-                <string>语境输入法</string>
-                <key>tsInputModeAlternateMenuTextKey</key>
-                <string>语境输入法</string>
-                <key>KeyboardLayout Name</key>
-                <string>语境输入法</string>
                 <key>tsInputModeDefaultStateKey</key>
                 <true/>
                 <key>tsInputModeIsVisibleKey</key>

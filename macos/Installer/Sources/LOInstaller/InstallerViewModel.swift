@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Combine
+import Carbon.HIToolbox
 
 // MARK: - 安装步骤
 
@@ -120,15 +121,11 @@ final class InstallerViewModel: ObservableObject {
             let script = """
             #!/bin/bash
             set -e
-            # 0. 先注销所有旧路径的 LaunchServices 注册（防止输入法列表出现重复项）
+            # 先注销所有旧路径的 LaunchServices 注册（防止输入法列表出现重复项）
             \(InstallerScripts.shellQuote(lsregister)) -u \(InstallerScripts.shellQuote(targetPath)) 2>/dev/null || true
             \(InstallerScripts.shellQuote(lsregister)) -u \(InstallerScripts.shellQuote(userBundlePath)) 2>/dev/null || true
-            # 1. 强制注册新 bundle 到 LaunchServices
+            # 强制注册新 bundle 到当前用户的 LaunchServices
             \(InstallerScripts.shellQuote(lsregister)) -f \(InstallerScripts.shellQuote(targetPath)) 2>&1
-            # 2. 刷新输入法菜单
-            killall TextInputMenuAgent 2>/dev/null || true
-            # 3. 启动输入法驻留进程
-            open \(InstallerScripts.shellQuote(targetPath))
             """
 
             let postScriptPath = (NSTemporaryDirectory() as NSString)
@@ -139,8 +136,8 @@ final class InstallerViewModel: ObservableObject {
                 try script.write(toFile: postScriptPath, atomically: true, encoding: .utf8)
                 try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: postScriptPath)
             } catch {
-                // 写脚本失败，用 NSWorkspace 后备
-                self.fallbackOpen(targetPath: targetPath)
+                // 写脚本失败，仍尝试在当前用户上下文显式注册并启动。
+                self.registerInputSourceAndLaunch(targetPath: targetPath)
                 return
             }
 
@@ -162,7 +159,7 @@ final class InstallerViewModel: ObservableObject {
             } catch {
                 // Process 启动失败，用 NSWorkspace 后备
                 try? FileManager.default.removeItem(atPath: postScriptPath)
-                self.fallbackOpen(targetPath: targetPath)
+                self.registerInputSourceAndLaunch(targetPath: targetPath)
                 return
             }
             try? FileManager.default.removeItem(atPath: postScriptPath)
@@ -174,24 +171,71 @@ final class InstallerViewModel: ObservableObject {
                 return
             }
 
-            self.finishAfterLaunch(targetPath: targetPath)
+            self.registerInputSourceAndLaunch(targetPath: targetPath)
         }
     }
 
     // MARK: - 特权执行
 
-    /// 后备方案：Process 不可用时，用 NSWorkspace 原生 API 打开输入法。
-    /// NSWorkspace.open 会触发 LaunchServices 注册 + 启动进程。
-    private func fallbackOpen(targetPath: String) {
+    /// 在普通用户会话中注册输入源，核对可见名称后再刷新菜单并启动。
+    /// LaunchServices 注册 bundle 与 TIS 注册输入源是两步，安装器都显式完成。
+    private func registerInputSourceAndLaunch(targetPath: String) {
         let url = URL(fileURLWithPath: targetPath)
+        let status = TISRegisterInputSource(url as CFURL)
+        guard status == noErr else {
+            DispatchQueue.main.async {
+                self.step = .failed("输入法文件已安装，但系统注册输入源失败（\(status)）。请重新安装，或重新登录后重试。")
+            }
+            return
+        }
+
+        guard let localizedName = localizedInputModeName() else {
+            DispatchQueue.main.async {
+                self.step = .failed("输入法文件已安装，但系统未读取到输入法名称。请重新登录后在系统设置中添加“语境输入法”。")
+            }
+            return
+        }
+
+        // 重新启动菜单代理，使刚注册的 source ID 和本地化名称立即刷新。
+        let refresh = Process()
+        refresh.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+        refresh.arguments = ["TextInputMenuAgent"]
+        do {
+            try refresh.run()
+            refresh.waitUntilExit()
+        } catch {
+            // 刷新失败不影响 source 注册与后续启动。
+        }
+
         let opened = NSWorkspace.shared.open(url)
         if opened {
+            NSLog("[LOInstaller] Registered input source: %@", localizedName)
             finishAfterLaunch(targetPath: targetPath)
         } else {
             DispatchQueue.main.async {
-                self.step = .failed("输入法已安装，但无法启动。请重新登录后在系统设置中启用输入法。")
+                self.step = .failed("输入法已注册并显示为“\(localizedName)”，但无法启动。请重新登录后在系统设置中启用输入法。")
             }
         }
+    }
+
+    /// 查找输入法唯一可见的模式 ID，并要求系统返回非空本地化名称。
+    private func localizedInputModeName() -> String? {
+        let modeID = "\(bundleId).pinyin"
+        let filter = [kTISPropertyInputSourceID as String: modeID] as CFDictionary
+        guard let unmanaged = TISCreateInputSourceList(filter, true) else { return nil }
+        let sources = unmanaged.takeRetainedValue() as? [TISInputSource] ?? []
+        for source in sources {
+            guard let idPointer = TISGetInputSourceProperty(source, kTISPropertyInputSourceID),
+                  let namePointer = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) else {
+                continue
+            }
+            let id = Unmanaged<CFString>.fromOpaque(idPointer).takeUnretainedValue() as String
+            let name = Unmanaged<CFString>.fromOpaque(namePointer).takeUnretainedValue() as String
+            if id == modeID, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return name
+            }
+        }
+        return nil
     }
 
     /// A successful `open` only acknowledges a launch request. Catch immediate crashes.

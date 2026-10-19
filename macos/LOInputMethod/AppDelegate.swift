@@ -1,5 +1,6 @@
 import AppKit
 import InputMethodKit
+import Carbon.HIToolbox
 
 // MARK: - 应用代理
 
@@ -24,6 +25,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 记录单例引用，供菜单 target 使用
         AppDelegate.shared = self
+
+        // 安装器会在用户会话注册输入源；这里也覆盖 make install 和手动替换 bundle。
+        ensureInputSourceRegistered()
 
         // 写调试日志到 Rime 用户目录
         let logPath = NSHomeDirectory() + "/Library/Rime/LOInputMethod.log"
@@ -55,6 +59,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 交给 macOS 系统原生处理（对齐 fcitx5-macos 方案）。
         // 不使用 CGEventTap（那样需要辅助功能权限且 TCC 绑定签名易失效）。
         // LOInputSourceSwitcher 代码保留备用，如需启用可在此调用 .shared.start()。
+    }
+
+    private func ensureInputSourceRegistered() {
+        let modeID = "\(Bundle.main.bundleIdentifier ?? "com.lo.inputmethod.ime").pinyin"
+        let filter = [kTISPropertyInputSourceID as String: modeID] as CFDictionary
+
+        func localizedModeName() -> String? {
+            guard let unmanaged = TISCreateInputSourceList(filter, true) else { return nil }
+            let sources = unmanaged.takeRetainedValue() as? [TISInputSource] ?? []
+            for source in sources {
+                guard let idPointer = TISGetInputSourceProperty(source, kTISPropertyInputSourceID),
+                      let namePointer = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) else {
+                    continue
+                }
+                let id = Unmanaged<CFString>.fromOpaque(idPointer).takeUnretainedValue() as String
+                let name = Unmanaged<CFString>.fromOpaque(namePointer).takeUnretainedValue() as String
+                if id == modeID, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return name
+                }
+            }
+            return nil
+        }
+
+        guard localizedModeName() == nil else { return }
+        let status = TISRegisterInputSource(Bundle.main.bundleURL as CFURL)
+        if status != noErr {
+            debugLog("输入源注册失败：status=\(status)")
+        } else if let name = localizedModeName() {
+            debugLog("输入源已注册：\(name)")
+        } else {
+            debugLog("输入源已注册，但系统仍未读取到非空名称：\(modeID)")
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
