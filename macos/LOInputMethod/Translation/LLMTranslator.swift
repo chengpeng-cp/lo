@@ -12,15 +12,17 @@ class LLMTranslator: TranslationServiceProtocol {
 
     /// 模型名称
     private let model: String
+    private let session: URLSession
 
     /// 请求超时时间
     private let timeoutInterval: TimeInterval = 30
 
     // MARK: - 初始化
 
-    init(provider: TranslationProvider, model: String) {
+    init(provider: TranslationProvider, model: String, session: URLSession = TranslationNetwork.shared) {
         self.provider = provider
         self.model = model
+        self.session = session
     }
 
     // MARK: - 翻译服务协议
@@ -28,14 +30,14 @@ class LLMTranslator: TranslationServiceProtocol {
     func translate(text: String, mode: TranslationMode, targetLanguage: TargetLanguage) async throws -> String {
         let request = try buildRequest(text: text, mode: mode, targetLanguage: targetLanguage, stream: false)
 
-        debugLog("[LLM] \(provider.rawValue) 开始翻译: model=\(model) mode=\(mode.rawValue) target=\(targetLanguage.rawValue) text='\(text)' (长度=\(text.count))")
+        debugLog("[LLM] \(provider.rawValue) 开始翻译: model=\(model) mode=\(mode.rawValue) target=\(targetLanguage.rawValue) (长度=\(text.count))")
 
         // 发送请求（复用共享 session 的连接池）
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await TranslationNetwork.shared.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
-            debugLog("[LLM] \(provider.rawValue) 网络请求失败: \(error.localizedDescription)")
+            debugLog("[LLM] \(provider.rawValue) 网络请求失败")
             throw TranslationError.networkError(error)
         }
 
@@ -47,8 +49,6 @@ class LLMTranslator: TranslationServiceProtocol {
         debugLog("[LLM] \(provider.rawValue) HTTP 状态码: \(httpResponse.statusCode), 响应长度: \(data.count) bytes")
 
         guard httpResponse.statusCode == 200 else {
-            let bodySnippet = String(data: data.prefix(500), encoding: .utf8) ?? "(二进制)"
-            debugLog("[LLM] \(provider.rawValue) 非 200 响应体: \(bodySnippet)")
             if let errorBody = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let errorDict = errorBody["error"] as? [String: Any],
                let message = errorDict["message"] as? String {
@@ -59,7 +59,7 @@ class LLMTranslator: TranslationServiceProtocol {
 
         // 解析响应
         let result = try parseResponse(data)
-        debugLog("[LLM] \(provider.rawValue) 翻译结果: '\(result)' (长度=\(result.count))")
+        debugLog("[LLM] \(provider.rawValue) 翻译完成，长度=\(result.count)")
         return result
     }
 
@@ -68,14 +68,14 @@ class LLMTranslator: TranslationServiceProtocol {
     func translateStream(text: String, mode: TranslationMode, targetLanguage: TargetLanguage, onDelta: @escaping (String) -> Void) async throws -> String {
         let request = try buildRequest(text: text, mode: mode, targetLanguage: targetLanguage, stream: true)
 
-        debugLog("[LLM] \(provider.rawValue) 流式翻译开始: model=\(model) mode=\(mode.rawValue) target=\(targetLanguage.rawValue) text='\(text)' (长度=\(text.count))")
+        debugLog("[LLM] \(provider.rawValue) 流式翻译开始: model=\(model) mode=\(mode.rawValue) target=\(targetLanguage.rawValue) (长度=\(text.count))")
 
         // 流式请求：用 bytes(for:) 逐块读取 SSE 响应
         let (bytes, response): (URLSession.AsyncBytes, URLResponse)
         do {
-            (bytes, response) = try await TranslationNetwork.shared.bytes(for: request)
+            (bytes, response) = try await session.bytes(for: request)
         } catch {
-            debugLog("[LLM] \(provider.rawValue) 流式请求失败: \(error.localizedDescription)")
+            debugLog("[LLM] \(provider.rawValue) 流式请求失败")
             throw TranslationError.networkError(error)
         }
 
@@ -89,10 +89,9 @@ class LLMTranslator: TranslationServiceProtocol {
             // 非 200：读取完整 body 报错
             var bodyData = Data()
             for try await byte in bytes {
+                guard bodyData.count < 1_048_576 else { throw TranslationError.invalidResponse }
                 bodyData.append(byte)
             }
-            let bodySnippet = String(data: bodyData.prefix(500), encoding: .utf8) ?? "(二进制)"
-            debugLog("[LLM] \(provider.rawValue) 流式非 200 响应体: \(bodySnippet)")
             if let errorBody = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
                let errorDict = errorBody["error"] as? [String: Any],
                let message = errorDict["message"] as? String {
@@ -101,41 +100,31 @@ class LLMTranslator: TranslationServiceProtocol {
             throw TranslationError.apiError("HTTP \(httpResponse.statusCode)")
         }
 
-        // 逐行解析 SSE：每行形如 "data: {json}"，以 "data: [DONE]" 结束
-        var accumulated = ""
-        for try await line in bytes.lines {
-            // 任务被取消时立即终止（用户已输入新内容）
-            if Task.isCancelled {
-                debugLog("[LLM] \(provider.rawValue) 流式翻译已取消")
-                throw CancellationError()
+        // 某些兼容端点忽略 stream=true 并返回普通 JSON。
+        if httpResponse.mimeType == "application/json" {
+            var data = Data()
+            for try await byte in bytes {
+                try Task.checkCancellation()
+                guard data.count < 1_048_576 else { throw TranslationError.invalidResponse }
+                data.append(byte)
             }
-
-            // SSE 事件以 "data:" 前缀开始，跳过空行与注释行（如 ": keep-alive"）
-            guard line.hasPrefix("data:") else { continue }
-
-            let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
-
-            // 流结束标记
-            if payload == "[DONE]" { break }
-
-            // 解析 JSON，提取 choices[0].delta.content
-            guard let data = payload.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let choices = json["choices"] as? [[String: Any]],
-                  let firstChoice = choices.first,
-                  let delta = firstChoice["delta"] as? [String: Any] else {
-                continue
-            }
-
-            // 首个 chunk 可能只含 role 无 content，跳过
-            guard let content = delta["content"] as? String, !content.isEmpty else { continue }
-
-            accumulated += content
-            onDelta(content)
+            let result = try parseResponse(data)
+            onDelta(result)
+            return result
         }
 
-        let result = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
-        debugLog("[LLM] \(provider.rawValue) 流式翻译完成: '\(result)' (长度=\(result.count))")
+        var decoder = LLMStreamDecoder()
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            guard line.hasPrefix("data:") else { continue }
+            let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            if let delta = try decoder.consume(payload), !delta.isEmpty {
+                onDelta(delta)
+            }
+            if decoder.isDone { break }
+        }
+        let result = try decoder.result()
+        debugLog("[LLM] \(provider.rawValue) 流式翻译完成，长度=\(result.count)")
         return result
     }
 
@@ -153,12 +142,12 @@ class LLMTranslator: TranslationServiceProtocol {
             guard !urlStr.isEmpty else {
                 throw TranslationError.apiError("自定义提供商未配置 API 端点")
             }
-            guard let url = URL(string: urlStr) else {
+            guard let url = URL(string: urlStr), TranslationNetwork.isAllowedEndpoint(url) else {
                 throw TranslationError.apiError("自定义 API 端点格式无效")
             }
             endpoint = url
         } else {
-            guard let url = URL(string: provider.baseURL) else {
+            guard let url = URL(string: provider.baseURL), TranslationNetwork.isAllowedEndpoint(url) else {
                 throw TranslationError.invalidResponse
             }
             endpoint = url
@@ -230,6 +219,58 @@ class LLMTranslator: TranslationServiceProtocol {
             throw TranslationError.invalidResponse
         }
 
-        return content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !result.isEmpty else { throw TranslationError.invalidResponse }
+        return result
+    }
+}
+
+/// 将截断流、服务端错误和正常结束区分开，避免把半截译文作为成功结果缓存。
+struct LLMStreamDecoder {
+    private(set) var accumulated = ""
+    private(set) var isDone = false
+    private var hasFinishReason = false
+
+    mutating func consume(_ payload: String) throws -> String? {
+        guard !payload.isEmpty else { return nil }
+        if payload == "[DONE]" {
+            isDone = true
+            return nil
+        }
+        guard let data = payload.data(using: .utf8), data.count <= 1_048_576,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw TranslationError.invalidResponse
+        }
+        if let error = json["error"] as? [String: Any] {
+            throw TranslationError.apiError(error["message"] as? String ?? "流式请求失败")
+        }
+        guard let choices = json["choices"] as? [[String: Any]] else {
+            throw TranslationError.invalidResponse
+        }
+        // usage 统计帧允许 choices 为空。
+        guard let first = choices.first else { return nil }
+        if let reason = first["finish_reason"] as? String {
+            guard reason == "stop" else {
+                throw TranslationError.apiError("翻译未完整生成（\(reason)）")
+            }
+            hasFinishReason = true
+        }
+        guard let delta = first["delta"] as? [String: Any] else {
+            throw TranslationError.invalidResponse
+        }
+        guard let content = delta["content"] as? String, !content.isEmpty else { return nil }
+        guard accumulated.utf8.count + content.utf8.count <= 1_048_576 else {
+            throw TranslationError.invalidResponse
+        }
+        accumulated += content
+        return content
+    }
+
+    func result() throws -> String {
+        let result = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (isDone || hasFinishReason), !result.isEmpty else {
+            throw TranslationError.invalidResponse
+        }
+        return result
     }
 }

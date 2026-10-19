@@ -46,29 +46,9 @@ echo ""
 echo "[2/6] 下载 rime-ice 词库..."
 bash scripts/fetch-dict.sh
 
-# 2. 组装 staging payload .app
-echo ""
-echo "[3/6] 组装输入法 payload..."
-rm -rf "$PAYLOAD_APP"
-mkdir -p "$PAYLOAD_APP/Contents/MacOS"
-mkdir -p "$PAYLOAD_APP/Contents/Resources/rime"
-cp "$BUILD_DIR/$APP_NAME" "$PAYLOAD_APP/Contents/MacOS/$APP_NAME"
-cp "$ROOT_DIR/LOInputMethod/Info.plist" "$PAYLOAD_APP/Contents/Info.plist"
-cp "$ROOT_DIR/LOInputMethod/Resources/AppIcon.icns" "$PAYLOAD_APP/Contents/Resources/AppIcon.icns"
-cp "$ROOT_DIR/LOInputMethod/Resources/InfoPlist.strings" "$PAYLOAD_APP/Contents/Resources/InfoPlist.strings"
-cp -r "$ROOT_DIR/LOInputMethod/Resources/rime/." "$PAYLOAD_APP/Contents/Resources/rime/"
-cp -r "$ROOT_DIR/LOInputMethod/Resources/zh-Hans.lproj" "$PAYLOAD_APP/Contents/Resources/"
-cp -r "$ROOT_DIR/LOInputMethod/Resources/en.lproj" "$PAYLOAD_APP/Contents/Resources/"
-
-# 把 librime 及依赖库打包进 payload（通过 INSTALL_DIR 覆盖指向 staging）
-echo "  打包 librime 动态库..."
-INSTALL_DIR="$PAYLOAD_APP" bash "$ROOT_DIR/scripts/build-librime.sh"
-
-# 签名 payload（ad-hoc）
-echo "  签名 payload..."
-codesign --force --deep --options runtime \
-    --identifier "$BUNDLE_ID" \
-    -s - "$PAYLOAD_APP"
+# 2. Build the same complete bundle used by local installation.
+echo "[3/6] 组装并验证输入法 payload..."
+bash "$ROOT_DIR/scripts/assemble-app.sh" "$PAYLOAD_APP"
 
 # 3. 构建安装器
 echo ""
@@ -84,6 +64,8 @@ mkdir -p "$INSTALLER_APP/Contents/MacOS"
 mkdir -p "$INSTALLER_APP/Contents/Resources"
 cp "$INSTALLER_BUILD_DIR/$INSTALLER_NAME" "$INSTALLER_APP/Contents/MacOS/$INSTALLER_NAME"
 cp "$ROOT_DIR/Installer/Resources/Info.plist" "$INSTALLER_APP/Contents/Info.plist"
+MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PAYLOAD_APP/Contents/Info.plist")"
+/usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MIN_OS" "$INSTALLER_APP/Contents/Info.plist"
 cp "$ROOT_DIR/LOInputMethod/Resources/AppIcon.icns" "$INSTALLER_APP/Contents/Resources/AppIcon.icns"
 # 嵌入输入法 payload，安装器运行时从这里读取并拷贝到系统目录
 cp -R "$PAYLOAD_APP" "$INSTALLER_APP/Contents/Resources/$APP_NAME.app"
@@ -93,6 +75,8 @@ echo "  签名安装器..."
 codesign --force --deep --options runtime \
     --identifier "$INSTALLER_BUNDLE_ID" \
     -s - "$INSTALLER_APP"
+
+codesign --verify --deep --strict "$INSTALLER_APP"
 
 # 5. 生成 DMG
 echo ""

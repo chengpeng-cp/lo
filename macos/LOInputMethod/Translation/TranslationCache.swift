@@ -24,12 +24,17 @@ class TranslationCache {
     /// 缓存文件路径
     private let cacheFilePath: String
 
+    // 保证写入次序与 set/clear 次序一致，避免旧快照覆盖清空操作。
+    private let persistenceQueue = DispatchQueue(label: "lo.translation-cache.persistence")
+    private var persistenceGeneration: UInt64 = 0
+
     // MARK: - 初始化
 
-    private init() {
+    init(cacheFileURL: URL? = nil) {
         // 缓存文件位于用户数据目录
-        let cacheDir = NSHomeDirectory() + "/Library/Application Support/LOInputMethod"
-        cacheFilePath = cacheDir + "/translation_cache.json"
+        let fileURL = cacheFileURL ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/LOInputMethod/translation_cache.json")
+        let cacheDir = fileURL.deletingLastPathComponent().path
+        cacheFilePath = fileURL.path
 
         // 确保目录存在
         let fm = FileManager.default
@@ -48,11 +53,11 @@ class TranslationCache {
     ///   - text: 原文
     ///   - targetLanguage: 目标语言代码
     /// - Returns: 翻译结果，如果没有缓存则返回 nil
-    func get(text: String, targetLanguage: String) -> String? {
+    func get(text: String, targetLanguage: String, context: String = "") -> String? {
         lock.lock()
         defer { lock.unlock() }
 
-        let key = cacheKey(text, targetLanguage: targetLanguage)
+        let key = cacheKey(text, targetLanguage: targetLanguage, context: context)
         guard let value = cache[key] else { return nil }
 
         // 更新访问顺序（移到末尾）
@@ -69,11 +74,12 @@ class TranslationCache {
     ///   - text: 原文
     ///   - translation: 翻译结果
     ///   - targetLanguage: 目标语言代码
-    func set(text: String, translation: String, targetLanguage: String) {
+    func set(text: String, translation: String, targetLanguage: String, context: String = "") {
+        guard !translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         lock.lock()
         defer { lock.unlock() }
 
-        let key = cacheKey(text, targetLanguage: targetLanguage)
+        let key = cacheKey(text, targetLanguage: targetLanguage, context: context)
 
         // 如果已存在，更新访问顺序
         if cache[key] != nil {
@@ -104,9 +110,11 @@ class TranslationCache {
 
     // MARK: - 私有方法
 
-    /// 生成缓存 key（目标语言 + 小写 + 去除首尾空白）
-    private func cacheKey(_ text: String, targetLanguage: String) -> String {
-        return targetLanguage + "::" + text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    /// 版本化结构键：保留大小写，并隔离提供商、模型、模式与端点。
+    private func cacheKey(_ text: String, targetLanguage: String, context: String) -> String {
+        let fields = ["v2", context, targetLanguage, text.trimmingCharacters(in: .whitespacesAndNewlines)]
+        let data = try! JSONSerialization.data(withJSONObject: fields)
+        return String(data: data, encoding: .utf8)!
     }
 
     /// LRU 淘汰超出限制的条目
@@ -122,16 +130,25 @@ class TranslationCache {
         guard let data = FileManager.default.contents(atPath: cacheFilePath) else { return }
         guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
 
-        cache = dict
-        accessOrder = Array(dict.keys)
+        cache = dict.filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        accessOrder = Array(cache.keys)
+        evictIfNeeded()
     }
 
     /// 异步保存缓存到文件
     private func saveToFileAsync() {
-        let cacheCopy = cache
+        persistenceGeneration &+= 1
+        let generation = persistenceGeneration
         let path = cacheFilePath
 
-        DispatchQueue.global(qos: .utility).async {
+        persistenceQueue.async {
+            self.lock.lock()
+            guard self.persistenceGeneration == generation else {
+                self.lock.unlock()
+                return
+            }
+            let cacheCopy = self.cache
+            self.lock.unlock()
             guard let data = try? JSONSerialization.data(
                 withJSONObject: cacheCopy,
                 options: [.sortedKeys]

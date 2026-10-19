@@ -57,26 +57,9 @@ final class InstallerViewModel: ObservableObject {
         //    LaunchServices 上下文，导致当前用户在输入法列表中只看到空白项
         //   （系统知道有输入法但读不到本地化名称）。这些操作改由 runPostInstall
         //    在普通用户上下文执行，与 make install && make restart 行为一致。
-        let script = """
-        set -e
-        # 终止旧进程
-        killall LOInputMethod 2>/dev/null || true
-        sleep 1
-        # 移除系统级旧版本
-        rm -rf "\(targetPath)"
-        # 移除用户级旧版本（make install 可能装在此处，同时存在会导致输入法列表重复）
-        rm -rf "\(userBundlePath)"
-        # 清理废纸篓中的历史副本
-        find "$HOME/.Trash" -maxdepth 1 -name "LOInputMethod*" -exec rm -rf {} + 2>/dev/null || true
-        find "/Users/$SUDO_USER/.Trash" -maxdepth 1 -name "LOInputMethod*" -exec rm -rf {} + 2>/dev/null || true
-        # 拷贝新版本到系统目录
-        cp -R "\(payloadPath)" "\(targetPath)"
-        # 修正权限
-        chmod -R 755 "\(targetPath)"
-        # 重新签名（ad-hoc，封住 bundle，固定 Identifier 以稳定 TCC 授权）
-        codesign --force --deep --options runtime --identifier "\(bundleId)" -s - "\(targetPath)" 2>/dev/null || true
-        echo "LO_INSTALL_DONE"
-        """
+        let script = InstallerScripts.install(
+            payload: payloadPath, target: targetPath, userBundle: userBundlePath
+        )
 
         // 3. 写入临时脚本文件（无需权限）
         let tmpPath = (NSTemporaryDirectory() as NSString)
@@ -136,15 +119,16 @@ final class InstallerViewModel: ObservableObject {
             let userBundlePath = "\(NSHomeDirectory())/Library/Input Methods/\(appName)"
             let script = """
             #!/bin/bash
+            set -e
             # 0. 先注销所有旧路径的 LaunchServices 注册（防止输入法列表出现重复项）
-            "\(lsregister)" -u "\(targetPath)" 2>/dev/null || true
-            "\(lsregister)" -u "\(userBundlePath)" 2>/dev/null || true
+            \(InstallerScripts.shellQuote(lsregister)) -u \(InstallerScripts.shellQuote(targetPath)) 2>/dev/null || true
+            \(InstallerScripts.shellQuote(lsregister)) -u \(InstallerScripts.shellQuote(userBundlePath)) 2>/dev/null || true
             # 1. 强制注册新 bundle 到 LaunchServices
-            "\(lsregister)" -f "\(targetPath)" 2>&1
+            \(InstallerScripts.shellQuote(lsregister)) -f \(InstallerScripts.shellQuote(targetPath)) 2>&1
             # 2. 刷新输入法菜单
             killall TextInputMenuAgent 2>/dev/null || true
             # 3. 启动输入法驻留进程
-            open "\(targetPath)"
+            open \(InstallerScripts.shellQuote(targetPath))
             """
 
             let postScriptPath = (NSTemporaryDirectory() as NSString)
@@ -164,7 +148,10 @@ final class InstallerViewModel: ObservableObject {
             let task = Process()
             task.launchPath = "/bin/bash"
             task.arguments = [postScriptPath]
-            if let logHandle = FileHandle(forWritingAtPath: logPath) {
+            FileManager.default.createFile(atPath: logPath, contents: nil)
+            let logHandle = FileHandle(forWritingAtPath: logPath)
+            defer { try? logHandle?.close() }
+            if let logHandle = logHandle {
                 logHandle.truncateFile(atOffset: 0)
                 task.standardOutput = logHandle
                 task.standardError = logHandle
@@ -180,12 +167,14 @@ final class InstallerViewModel: ObservableObject {
             }
             try? FileManager.default.removeItem(atPath: postScriptPath)
 
-            // 等待输入法进程启动并初始化 IMKServer
-            Thread.sleep(forTimeInterval: 2)
-
-            DispatchQueue.main.async {
-                self.step = .finished
+            guard task.terminationStatus == 0 else {
+                DispatchQueue.main.async {
+                    self.step = .failed("输入法文件已安装，但注册或启动失败。请重试安装，或查看日志：\(logPath)")
+                }
+                return
             }
+
+            self.finishAfterLaunch(targetPath: targetPath)
         }
     }
 
@@ -195,10 +184,28 @@ final class InstallerViewModel: ObservableObject {
     /// NSWorkspace.open 会触发 LaunchServices 注册 + 启动进程。
     private func fallbackOpen(targetPath: String) {
         let url = URL(fileURLWithPath: targetPath)
-        NSWorkspace.shared.open(url)
-        Thread.sleep(forTimeInterval: 2)
-        DispatchQueue.main.async {
-            self.step = .finished
+        let opened = NSWorkspace.shared.open(url)
+        if opened {
+            finishAfterLaunch(targetPath: targetPath)
+        } else {
+            DispatchQueue.main.async {
+                self.step = .failed("输入法已安装，但无法启动。请重新登录后在系统设置中启用输入法。")
+            }
+        }
+    }
+
+    /// A successful `open` only acknowledges a launch request. Catch immediate crashes.
+    private func finishAfterLaunch(targetPath: String) {
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 2) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let targetURL = URL(fileURLWithPath: targetPath).standardizedFileURL
+                let running = NSWorkspace.shared.runningApplications.contains {
+                    !$0.isTerminated && $0.bundleIdentifier == self.bundleId &&
+                    $0.bundleURL?.standardizedFileURL == targetURL
+                }
+                self.step = running ? .finished : .failed("输入法文件已安装，但启动后未保持运行。请重新登录后重试；若仍失败，请提交崩溃日志。")
+            }
         }
     }
 
@@ -216,8 +223,11 @@ final class InstallerViewModel: ObservableObject {
         let appleScriptText = "do shell script \"/bin/bash \\\"\(escaped)\\\"\" with administrator privileges"
 
         var errorDict: NSDictionary?
-        let appleScript = NSAppleScript(source: appleScriptText)
-        _ = appleScript?.executeAndReturnError(&errorDict)
+        guard let appleScript = NSAppleScript(source: appleScriptText) else {
+            completion("无法创建管理员安装脚本。")
+            return
+        }
+        let result = appleScript.executeAndReturnError(&errorDict)
 
         if let error = errorDict {
             let number = (error[NSAppleScript.errorNumber] as? Int) ?? 0
@@ -228,8 +238,10 @@ final class InstallerViewModel: ObservableObject {
                 let message = (error[NSAppleScript.errorMessage] as? String) ?? "未知错误（代码 \(number)）"
                 completion(message)
             }
-        } else {
+        } else if result.stringValue?.contains("LO_INSTALL_DONE") == true {
             completion(nil)
+        } else {
+            completion("安装没有返回完成标记，请重新下载安装包后重试。")
         }
     }
 

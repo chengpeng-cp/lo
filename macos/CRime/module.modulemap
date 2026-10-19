@@ -1,5 +1,5 @@
 module CRime {
-    header "/opt/homebrew/include/rime_api.h"
+    header "include/rime_shim.h"
     link "rime"
     export *
 }

@@ -33,6 +33,50 @@ func debugLog(_ message: String) {
     }
 }
 
+/// 独立短按 Shift 的状态机。普通按键或其他修饰键会取消切换。
+struct LOShiftTapTracker {
+    private var lastModifiers: NSEvent.ModifierFlags = []
+    private var shiftDownTimestamp: TimeInterval?
+
+    mutating func reset(modifiers: NSEvent.ModifierFlags = []) {
+        lastModifiers = modifiers.intersection(.deviceIndependentFlagsMask)
+        shiftDownTimestamp = nil
+    }
+
+    mutating func noteKeyDown(modifiers: NSEvent.ModifierFlags) {
+        reset(modifiers: modifiers)
+    }
+
+    mutating func shouldToggle(for event: NSEvent, threshold: TimeInterval) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let wasShiftDown = lastModifiers.contains(.shift)
+        let isShiftDown = flags.contains(.shift)
+        defer { lastModifiers = flags }
+        guard !flags.contains(.command), !flags.contains(.control), !flags.contains(.option) else {
+            shiftDownTimestamp = nil
+            return false
+        }
+        let changes = lastModifiers.symmetricDifference(flags)
+        let keyCode = RimeEngine.isModifierKeycode(event.keyCode)
+            ? event.keyCode : RimeEngine.inferModifierKeycode(from: changes)
+        guard keyCode == 56 || keyCode == 60 else {
+            shiftDownTimestamp = nil
+            return false
+        }
+        if isShiftDown && !wasShiftDown {
+            shiftDownTimestamp = event.timestamp
+        } else if wasShiftDown && !isShiftDown {
+            defer { shiftDownTimestamp = nil }
+            guard let start = shiftDownTimestamp else { return false }
+            return event.timestamp - start >= 0 && event.timestamp - start < threshold
+        } else {
+            // 同时按下左右 Shift 时不把后续释放当成独立短按。
+            shiftDownTimestamp = nil
+        }
+        return false
+    }
+}
+
 // MARK: - 输入控制器
 
 /// 语境输入法控制器，处理按键输入和候选词显示
@@ -60,11 +104,10 @@ class LOInputController: IMKInputController {
     /// 用户设置
     private var userSettings = LOSettings.load()
 
-    /// 上一次的修饰键状态，用于 flagsChanged 事件计算变化量
-    /// （Shift 短按切换中英文由 Rime ascii_composer 在 keyDown 路径处理，
-    ///  此处仅保留以兼容潜在的 flagsChanged 判定，CapsLock 已交由
-    ///  LOInputSourceSwitcher 的 CGEventTap 处理，不在此分支处理）
-    private var lastModifiers: NSEvent.ModifierFlags = []
+    /// Shift 只通过 flagsChanged 上报，普通 keyDown 会取消本次短按切换。
+    private var shiftTapTracker = LOShiftTapTracker()
+
+    private var settingsObserver: NSObjectProtocol?
 
     /// 当前处于激活状态的控制器（用于 CGEventTap 切走前提交预编辑文本）
     private static weak var activeController: LOInputController?
@@ -96,35 +139,42 @@ class LOInputController: IMKInputController {
         // TranslationScheduler 是 @MainActor，需在 MainActor 上下文中设置回调
         MainActor.assumeIsolated {
             // 防抖期间：静默更新悬浮窗上行原文（不闪烁）
-            translationScheduler.onOriginalUpdate = { [weak self] text in
-                self?.translationOverlay.silentUpdateOriginal(text)
+            translationScheduler.onOriginalUpdate = { text in
+                LOTranslationOverlay.shared.silentUpdateOriginal(text)
             }
             // 翻译开始：显示 loading
-            translationScheduler.onTranslationStart = { [weak self] text in
-                self?.translationOverlay.showLoading(originalText: text)
+            translationScheduler.onTranslationStart = { text in
+                LOTranslationOverlay.shared.showLoading(originalText: text)
             }
             // 流式增量：逐步更新译文（原文已在 loading 时设置，保持不变）
-            translationScheduler.onTranslationDelta = { [weak self] _, translation in
-                self?.translationOverlay.updateTranslation(translation)
+            translationScheduler.onTranslationDelta = { _, translation in
+                LOTranslationOverlay.shared.updateTranslation(translation)
             }
             // 翻译完成：更新译文
-            translationScheduler.onTranslationReady = { [weak self] original, translation in
-                self?.translationOverlay.show(originalText: original, translation: translation)
+            translationScheduler.onTranslationReady = { original, translation in
+                LOTranslationOverlay.shared.show(originalText: original, translation: translation)
             }
             // 翻译失败：显示错误，避免悬浮窗卡在 loading 状态
-            translationScheduler.onTranslationFailed = { [weak self] original, error in
-                self?.translationOverlay.showError(originalText: original, error: error)
+            translationScheduler.onTranslationFailed = { original, error in
+                LOTranslationOverlay.shared.showError(originalText: original, error: error)
             }
         }
 
         // 监听设置变更：实时更新悬浮窗配置（位置模式、透明度、自动消失等）
-        NotificationCenter.default.addObserver(
+        settingsObserver = NotificationCenter.default.addObserver(
             forName: .LOSettingsDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             self?.applySettingsToOverlay()
         }
+    }
+
+    deinit {
+        if let settingsObserver = settingsObserver {
+            NotificationCenter.default.removeObserver(settingsObserver)
+        }
+        sessionManager.removeAllSessions()
     }
 
     /// 将用户设置应用到翻译悬浮窗
@@ -144,12 +194,12 @@ class LOInputController: IMKInputController {
 
     /// 提交当前未转换的原始按键输入，使其保留在输入框中。
     /// 使用 raw input（不含音节分隔空格），并用 markedRange 替换当前预编辑区。
-    private func commitRawPreedit() {
+    private func commitRawPreedit(to suppliedClient: IMKTextInput? = nil) {
         guard currentSession != 0 && rimeEngine.isComposing(session: currentSession) else {
             debugLog("commitRawPreedit: 未在组合输入状态")
             return
         }
-        guard let textInput = client() else {
+        guard let textInput = suppliedClient ?? client() else {
             debugLog("commitRawPreedit: client 无法转换为 IMKTextInput")
             return
         }
@@ -158,11 +208,10 @@ class LOInputController: IMKInputController {
             return
         }
         let markedRange = textInput.markedRange()
-        debugLog("commitRawPreedit: rawInput='\(rawInput)'，markedRange=\(NSStringFromRange(markedRange))")
         // 用 raw input 直接替换 marked text 区域，避免音节分隔空格，也避免先清空再插入导致的丢失。
         textInput.insertText(rawInput, replacementRange: markedRange)
         rimeEngine.clearComposition(session: currentSession)
-        debugLog("commitRawPreedit: 已提交 '\(rawInput)'")
+        candidateWindow.hide()
     }
 
     // MARK: - 输入法生命周期
@@ -183,8 +232,9 @@ class LOInputController: IMKInputController {
             return rect
         }
 
-        // 重置修饰键状态：用空集初始化，让首次 flagsChanged 自然计算 changes
-        lastModifiers = []
+        applySettingsToOverlay()
+        // 激活时可能正按着 Shift，不能将它的释放误判为一次独立短按。
+        shiftTapTracker.reset(modifiers: NSEvent.modifierFlags)
 
         // 为当前客户端获取或创建 Rime 会话
         if let client = client {
@@ -208,7 +258,8 @@ class LOInputController: IMKInputController {
             if !candidates.isEmpty {
                 candidateWindow.show(
                     candidates: candidates,
-                    client: client as? IMKTextInput
+                    client: client as? IMKTextInput,
+                    highlightedIndex: rimeEngine.getHighlightedCandidateIndex(session: currentSession)
                 )
             }
         }
@@ -216,25 +267,11 @@ class LOInputController: IMKInputController {
 
     /// 输入法被停用时调用
     override func deactivateServer(_ client: Any!) {
-        super.deactivateServer(client)
-
         // 如果切走前没有提交过预编辑文本，在这里做最后一次兜底提交。
         // 实际提交动作通常在 LOInputSourceSwitcher 切到 ABC 前完成，
         // 因为 deactivateServer 阶段客户端可能已不接受 insertText。
-        if currentSession != 0 && rimeEngine.isComposing(session: currentSession) {
-            if let textInput = client as? IMKTextInput,
-               let preedit = rimeEngine.getPreedit(session: currentSession),
-               !preedit.isEmpty {
-                textInput.setMarkedText(
-                    "",
-                    selectionRange: NSRange(location: 0, length: 0),
-                    replacementRange: NSRange(location: NSNotFound, length: 0)
-                )
-                textInput.insertText(preedit, replacementRange: NSRange(location: NSNotFound, length: 0))
-                debugLog("deactivateServer 兜底提交: '\(preedit)'")
-            }
-            rimeEngine.clearComposition(session: currentSession)
-        }
+        commitRawPreedit(to: client as? IMKTextInput)
+        super.deactivateServer(client)
 
         // 隐藏候选词窗口
         candidateWindow.hide()
@@ -243,11 +280,43 @@ class LOInputController: IMKInputController {
             sessionManager.removeSession(for: client)
         }
         currentSession = 0
+        shiftTapTracker.reset()
 
         // 取消激活控制器标记
         if LOInputController.activeController === self {
             LOInputController.activeController = nil
         }
+    }
+
+    /// 客户端在移动光标、结束编辑等情况下也会显式要求提交组合文本。
+    override func commitComposition(_ sender: Any!) {
+        commitCurrentComposition(to: (sender as? IMKTextInput) ?? client())
+    }
+
+    private func insertCommit(_ text: String, to textInput: IMKTextInput) {
+        textInput.insertText(text, replacementRange: textInput.markedRange())
+        Task { @MainActor in
+            TranslationScheduler.shared.commit(text: text)
+        }
+    }
+
+    private func commitCurrentComposition(to textInput: IMKTextInput?) {
+        guard currentSession != 0, let textInput = textInput else { return }
+        if let text = rimeEngine.commitComposition(session: currentSession) {
+            insertCommit(text, to: textInput)
+        }
+        updateUI(client: textInput)
+    }
+
+    /// default.yaml 将 Shift 配置为 noop，由此处识别短按。
+    private func handleFlagsChanged(_ event: NSEvent, client: Any?) -> Bool {
+        guard shiftTapTracker.shouldToggle(for: event, threshold: userSettings.shiftLongPressThreshold) else {
+            return false
+        }
+        commitRawPreedit(to: client as? IMKTextInput)
+        rimeEngine.setAsciiMode(!rimeEngine.isAsciiMode(session: currentSession), session: currentSession)
+        updateUI(client: client)
+        return true
     }
 
     // MARK: - 按键处理
@@ -266,14 +335,13 @@ class LOInputController: IMKInputController {
     ///   - client: 输入法客户端
     /// - Returns: 是否已处理该按键
     override func handle(_ event: NSEvent!, client: Any!) -> Bool {
-        guard currentSession != 0 else { return false }
+        guard currentSession != 0, let event = event else { return false }
 
-        // 修饰键变化事件：放行交由 Rime ascii_composer 处理 Shift 短按切换中英文。
-        // CapsLock 的中英互切不在此处理——已交由 LOInputSourceSwitcher 的 CGEventTap
-        // 在系统层拦截原生 CapsLock 事件并自行切换输入源（对齐微信输入法）。
         if event.type == .flagsChanged {
-            return false
+            return handleFlagsChanged(event, client: client)
         }
+        guard event.type == .keyDown else { return false }
+        shiftTapTracker.noteKeyDown(modifiers: event.modifierFlags)
 
         // 快捷复制翻译内容：Control+Command+逗号（⌃⌘,）
         // 在 Command 放行逻辑之前拦截，确保不被放行给系统
@@ -282,8 +350,7 @@ class LOInputController: IMKInputController {
                 if LOTranslationOverlay.shared.copyLastTranslation() {
                     // 若正在组合输入，先清除预编辑文本
                     if rimeEngine.isComposing(session: currentSession) {
-                        _ = rimeEngine.commitComposition(session: currentSession)
-                        updateUI(client: client)
+                        commitCurrentComposition(to: client as? IMKTextInput)
                     }
                     return true
                 }
@@ -295,8 +362,7 @@ class LOInputController: IMKInputController {
         if event.modifierFlags.contains(.command) {
             // 若正在组合输入，先清除预编辑文本，避免干扰客户端的命令操作
             if rimeEngine.isComposing(session: currentSession) {
-                _ = rimeEngine.commitComposition(session: currentSession)
-                updateUI(client: client)
+                commitCurrentComposition(to: client as? IMKTextInput)
             }
             return false
         }
@@ -360,7 +426,7 @@ class LOInputController: IMKInputController {
         if let commitText = rimeEngine.getCommit(session: currentSession) {
             // 将提交文本发送给客户端
             if let textInput = client as? IMKTextInput {
-                textInput.insertText(commitText, replacementRange: NSRange(location: NSNotFound, length: 0))
+                textInput.insertText(commitText, replacementRange: textInput.markedRange())
             }
 
             // 提交文本交给翻译调度器（防抖累积 + 中文过滤 + 翻译请求）
@@ -431,7 +497,8 @@ class LOInputController: IMKInputController {
             } else {
                 candidateWindow.show(
                     candidates: candidates,
-                    client: client as? IMKTextInput
+                    client: client as? IMKTextInput,
+                    highlightedIndex: rimeEngine.getHighlightedCandidateIndex(session: currentSession)
                 )
             }
         } else {
@@ -509,14 +576,14 @@ class LOInputController: IMKInputController {
     /// 处理候选词被选中
     /// - Parameter index: 候选词索引
     private func handleCandidateSelected(_ index: Int) {
-        guard currentSession != 0 else { return }
+        guard currentSession != 0, candidateWindow.candidates.indices.contains(index) else { return }
         rimeEngine.selectCandidateOnCurrentPage(index: index, session: currentSession)
 
         // 检查是否有提交文本
         if let commitText = rimeEngine.getCommit(session: currentSession) {
             // 提交文本到客户端
             if let textInput = client() as IMKTextInput? {
-                textInput.insertText(commitText, replacementRange: NSRange(location: NSNotFound, length: 0))
+                textInput.insertText(commitText, replacementRange: textInput.markedRange())
             }
             // 提交给翻译调度器，与空格提交走同一路径，确保累积前面内容
             let commitTextCopy = commitText
@@ -539,7 +606,8 @@ class LOInputController: IMKInputController {
         let candidates = rimeEngine.getCandidates(session: currentSession)
         candidateWindow.show(
             candidates: candidates,
-            client: client() as IMKTextInput?
+            client: client() as IMKTextInput?,
+            highlightedIndex: rimeEngine.getHighlightedCandidateIndex(session: currentSession)
         )
     }
 }

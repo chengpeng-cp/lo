@@ -125,8 +125,8 @@ class LOTranslationOverlay {
     /// 自动消失定时器
     private var dismissTimer: Timer?
 
-    /// 淡出动画
-    private var fadeAnimation: NSAnimation?
+    /// 每次展示递增，防止旧淡出动画的 completion 隐藏刚到达的新结果。
+    private var visibilityRevision: UInt = 0
 
     /// 光标位置提供者（跟随光标模式使用）
     /// 由 LOInputController 在 activateServer 时设置，返回当前输入光标的屏幕坐标
@@ -252,6 +252,8 @@ class LOTranslationOverlay {
     private func resizeAndShow() {
         let size = overlayView.preferredSize()
         guard size.width > 0 && size.height > 0 else { return }
+        visibilityRevision &+= 1
+        panel.alphaValue = config.opacity
 
         var currentOrigin = panel.frame.origin
 
@@ -403,6 +405,8 @@ class LOTranslationOverlay {
     /// 淡出动画后隐藏
     private func fadeOutAndHide() {
         guard panel.isVisible else { return }
+        visibilityRevision &+= 1
+        let revision = visibilityRevision
 
         // 使用简单的 alpha 动画
         NSAnimationContext.runAnimationGroup({ context in
@@ -411,6 +415,10 @@ class LOTranslationOverlay {
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             guard let self = self else { return }
+            guard self.visibilityRevision == revision else {
+                self.panel.alphaValue = self.config.opacity
+                return
+            }
             self.panel.orderOut(nil)
             self.panel.alphaValue = self.config.opacity
             // 可移动模式下保存位置

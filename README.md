@@ -37,7 +37,7 @@
 
 ### macOS
 
-**系统要求**：macOS 13 Ventura 或更高版本（Apple Silicon / Intel 均可）
+**系统要求**：下载与你的 CPU 架构和系统版本匹配的安装包。源码的 Swift 部署目标为 macOS 13，但最终安装包的最低系统版本取决于 librime 等依赖；打包脚本会将真实最低版本写入应用。当前构建为本机架构，不会自动生成 Universal 安装包。
 
 1. 下载 `LOInputMethod-<version>.dmg`
 2. 双击挂载 DMG，将「语境输入法安装器」拖到「应用程序」文件夹
@@ -49,7 +49,7 @@
 
 ### Windows
 
-**系统要求**：Windows 10 1809+ 或 Windows 11，64 位系统
+**系统要求**：Windows 10 1809+ 或 Windows 11。当前构建为 x64 TSF 输入法，支持 x64 宿主应用；32 位应用和 ARM64 原生宿主尚需对应架构版本。
 
 1. 下载 `LOInputMethod-Setup-<version>.exe`
 2. 双击运行，按提示完成安装（需要管理员权限以注册 TSF 输入法）
@@ -79,7 +79,7 @@
 4. 选择目标语言（默认 English）和翻译模式
 5. 关闭设置页，开始打字即可看到悬浮窗实时翻译
 
-API Key 存储在系统密钥链中，不会上传到任何第三方服务器，仅用于直接调用对应 API。
+API Key 保存在本机安全存储中，仅随请求发送给你选择的 API 服务。启用翻译后，待翻译文本会发送给所选服务；翻译缓存会保存在本机。
 
 ## 🏗️ 从源码构建
 
@@ -100,7 +100,7 @@ API Key 存储在系统密钥链中，不会上传到任何第三方服务器，
 
 #### macOS：克隆并安装运行
 
-要求 macOS 13 或更高版本、Xcode Command Line Tools（含 Swift 5.9+）和 Homebrew。
+要求受所安装 librime 版本支持的 macOS、Xcode Command Line Tools（含 Swift 5.9+）和 Homebrew。
 
 ```bash
 git clone https://github.com/chengpeng-cp/lo.git
@@ -160,55 +160,11 @@ lo/
 └── .github/workflows/         # CI 构建（GitHub Actions）
 ```
 
-#### macOS 构建命令
+### 日常开发命令
 
-**依赖**：
-- Xcode 15+（含 Swift 5.9+）
-- [Homebrew](https://brew.sh/)
+在 `macos/` 中执行 `make build` 只编译；`make install-full` 在构建、词库下载及签名验证成功后替换用户级安装，并在替换失败时回滚。已有系统级安装时，请使用 DMG 安装器升级。
 
-```bash
-# 安装 librime
-brew install librime
-
-# 构建输入法主程序
-cd macos
-make build        # 等价于 swift build -c release
-
-# 下载 rime-ice 社区词库（首次构建时）
-bash scripts/fetch-dict.sh
-
-# 一键打包（构建 → 组装 .app → 签名 → 生成 DMG）
-make package      # 或 bash scripts/package.sh
-# 产物：macos/dist/语境输入法-<version>.dmg
-```
-
-#### Windows 构建命令
-
-**依赖**：
-- Visual Studio 2019+（带 MSVC、CMake、Windows SDK 10.0+）
-- [NSIS](https://nsis.sourceforge.io/)（用于制作安装包）
-- 7-Zip（解压 librime 预编译包用）
-- librime 预编译包（本地构建可用 `vcpkg install librime`）
-
-```bat
-cd windows
-
-:: 配置 CMake
-cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
-
-:: 编译
-cmake --build build --config Release --parallel
-
-:: 产物在 build\bin\Release\LOInputMethod.dll
-
-:: 下载 rime-ice 词库（可选）
-scripts\fetch-dict.bat
-
-:: 打包为安装包（需 NSIS）
-cd installer
-makensis installer.nsi
-:: 产物：windows\dist\LOInputMethod-Setup-<version>.exe
-```
+Windows 请在 `windows/` 中执行 `scripts\build.bat Release` 或 `scripts\package.bat Release`。脚本会下载依赖并检查必需词库，缺少资源时停止打包。安装后可用 `Ctrl + Alt + S` 打开设置。
 
 ### CI 自动构建
 

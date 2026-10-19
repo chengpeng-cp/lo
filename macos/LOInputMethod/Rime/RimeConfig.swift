@@ -17,10 +17,10 @@ enum RimeConfig {
     }
 
     /// 确保用户数据目录存在
-    static func ensureUserDirExists() {
+    static func ensureUserDirExists(at directory: String = userDir) {
         let fm = FileManager.default
-        if !fm.fileExists(atPath: userDir) {
-            try? fm.createDirectory(atPath: userDir, withIntermediateDirectories: true)
+        if !fm.fileExists(atPath: directory) {
+            try? fm.createDirectory(atPath: directory, withIntermediateDirectories: true)
         }
     }
 }

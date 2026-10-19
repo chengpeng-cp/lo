@@ -33,7 +33,7 @@ class LOCandidateWindow {
         // 创建无边框弹出菜单级别的面板
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 100, height: 40),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -58,11 +58,11 @@ class LOCandidateWindow {
     /// - Parameters:
     ///   - candidates: 候选词列表
     ///   - client: 输入法客户端，用于获取光标位置
-    func show(candidates: [Candidate], client: IMKTextInput?) {
+    func show(candidates: [Candidate], client: IMKTextInput?, highlightedIndex: Int = 0) {
         self.candidates = candidates
-        selectedIndex = 0
+        selectedIndex = max(0, min(highlightedIndex, candidates.count - 1))
         candidateView.candidates = candidates
-        candidateView.highlightedIndex = 0
+        candidateView.highlightedIndex = selectedIndex
 
         // 计算所需尺寸
         let size = candidateView.preferredSize()
@@ -88,6 +88,8 @@ class LOCandidateWindow {
         if panel.isVisible {
             panel.orderOut(nil)
         }
+        candidates = []
+        selectedIndex = 0
     }
 
     /// 窗口是否可见
@@ -180,15 +182,19 @@ class LOCandidateWindow {
 
         if rect.origin.x != 0 || rect.origin.y != 0 {
             // 成功获取光标位置，将候选词窗口放在光标下方
-            positionBelowCursor(rect, screen: NSScreen.main)
+            positionBelowCursor(rect, screen: screenContaining(rect.origin))
         } else {
             // 无法获取光标位置，使用鼠标位置
             let mouseLocation = NSEvent.mouseLocation
             positionBelowCursor(
                 NSRect(x: mouseLocation.x, y: mouseLocation.y, width: 0, height: 0),
-                screen: NSScreen.main
+                screen: screenContaining(mouseLocation)
             )
         }
+    }
+
+    private func screenContaining(_ point: NSPoint) -> NSScreen? {
+        NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main
     }
 
     /// 将窗口定位到光标矩形下方
@@ -226,6 +232,7 @@ class LOCandidateWindow {
 
     /// 处理候选词点击
     private func handleCandidateClick(_ index: Int) {
+        guard candidates.indices.contains(index) else { return }
         selectedIndex = index
         onCandidateSelected?(index)
     }

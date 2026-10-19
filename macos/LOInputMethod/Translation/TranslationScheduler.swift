@@ -41,6 +41,13 @@ class TranslationScheduler {
 
     /// 当前进行中的翻译任务，发起新翻译前取消旧任务，避免竞态
     private var currentTranslationTask: Task<Void, Never>?
+    private var requestGeneration: UInt64 = 0
+
+    private func invalidateTranslation() {
+        requestGeneration &+= 1
+        currentTranslationTask?.cancel()
+        currentTranslationTask = nil
+    }
 
     // MARK: - 回调
 
@@ -77,6 +84,7 @@ class TranslationScheduler {
         // 翻译功能关闭时，不执行任何翻译逻辑
         guard settings.translationEnabled else { return }
 
+        invalidateTranslation()
         lock.lock()
         // 仅刷新时间基准与段落超时定时器，不改变 currentSegment
         lastCommitTime = Date()
@@ -96,12 +104,13 @@ class TranslationScheduler {
         // 翻译功能关闭时，不执行任何翻译逻辑
         guard settings.translationEnabled else { return }
 
+        invalidateTranslation()
         lock.lock()
 
         let isSegmentEmpty = currentSegment.isEmpty
         // 空段落且文本无需翻译时直接跳过；非空段落则允许追加（如标点）
         guard !isSegmentEmpty || shouldTranslate(text) else {
-            debugLog("[Scheduler] commit 跳过（无需翻译）: '\(text)'")
+            debugLog("[Scheduler] commit 跳过（无需翻译）")
             lock.unlock()
             return
         }
@@ -110,7 +119,7 @@ class TranslationScheduler {
         let elapsed = now.timeIntervalSince(lastCommitTime)
         // 长停顿超过阈值，开启新段落
         if !isSegmentEmpty && elapsed > settings.segmentPauseThreshold {
-            debugLog("[Scheduler] 段落超时重置: elapsed=\(elapsed)s threshold=\(settings.segmentPauseThreshold)s 旧段落='\(currentSegment)'")
+            debugLog("[Scheduler] 段落超时重置")
             currentSegment = ""
         }
 
@@ -125,7 +134,7 @@ class TranslationScheduler {
         let segmentToUpdate = currentSegment
         lock.unlock()
 
-        debugLog("[Scheduler] commit: '\(text)' → 段落='\(segmentToUpdate)'")
+        debugLog("[Scheduler] commit，段落长度=\(segmentToUpdate.count)")
 
         // 通知原文更新
         onOriginalUpdate?(segmentToUpdate)
@@ -137,6 +146,7 @@ class TranslationScheduler {
 
     /// 重置调度器状态（如切换输入法时调用）
     func reset() {
+        invalidateTranslation()
         lock.lock()
         currentSegment = ""
         lastCommitTime = Date.distantPast
@@ -150,6 +160,7 @@ class TranslationScheduler {
 
     /// 更新翻译服务（切换翻译提供商或模型时调用）
     func updateTranslator() {
+        invalidateTranslation()
         let settings = LOSettings.load()
         translator = Self.createTranslator(for: settings)
         // 预热连接：提前与当前翻译端点建立 TCP+TLS，后续请求可复用，减少首次翻译握手延迟
@@ -171,8 +182,8 @@ class TranslationScheduler {
                 url = URL(string: provider.baseURL)
             }
         } else {
-            // 免费引擎（Bing）预热 token 端点
-            url = URL(string: "https://edge.microsoft.com/translate/auth")
+            // 免费引擎（Bing）预热微软翻译端点
+            url = URL(string: "https://edge.microsoft.com/translate/translatetext")
         }
         guard let url = url else { return }
         TranslationNetwork.warmup(url: url)
@@ -290,14 +301,20 @@ class TranslationScheduler {
 
         guard !text.isEmpty else { return }
 
-        debugLog("[Scheduler] 触发翻译: '\(text)' (长度=\(text.count))")
+        debugLog("[Scheduler] 触发翻译，长度=\(text.count)")
+        invalidateTranslation()
+        let generation = requestGeneration
+        let translator = self.translator
+        let snapshot = settings
 
         // 获取当前翻译模式与目标语言
-        let mode = TranslationMode(rawValue: settings.translationMode) ?? .fluent
-        let targetLang = TargetLanguage(rawValue: settings.targetLanguage) ?? .english
+        let mode = TranslationMode(rawValue: snapshot.translationMode) ?? .fluent
+        let targetLang = TargetLanguage(rawValue: snapshot.targetLanguage) ?? .english
+
+        let cacheContext = [snapshot.translationProvider, snapshot.translationModel, snapshot.customLLMBaseURL, mode.rawValue, translator is BingTranslator ? "free" : "llm"].joined(separator: "\u{1F}")
 
         // 检查缓存
-        if let cached = cache.get(text: text, targetLanguage: targetLang.rawValue) {
+        if let cached = cache.get(text: text, targetLanguage: targetLang.rawValue, context: cacheContext) {
             debugLog("[Scheduler] 命中缓存")
             onTranslationReady?(text, cached)
             return
@@ -306,11 +323,8 @@ class TranslationScheduler {
         // 通知翻译开始
         onTranslationStart?(text)
 
-        // 取消进行中的旧翻译任务，避免旧结果/错误覆盖当前状态
-        currentTranslationTask?.cancel()
-
         // 大模型翻译默认走流式（边生成边显示），语境等传统机器翻译一次性返回
-        let provider = TranslationProvider.from(settings.translationProvider)
+        let provider = TranslationProvider.from(snapshot.translationProvider)
         let useStream = !provider.isFree
 
         // 异步执行翻译
@@ -321,7 +335,7 @@ class TranslationScheduler {
                 if useStream {
                     // 流式：每个增量片段累积后回调 UI 实时更新悬浮窗
                     var accumulated = ""
-                    result = try await self.translator.translateStream(
+                    result = try await translator.translateStream(
                         text: text,
                         mode: mode,
                         targetLanguage: targetLang
@@ -329,38 +343,34 @@ class TranslationScheduler {
                         accumulated += delta
                         let snapshot = accumulated
                         DispatchQueue.main.async {
-                            self?.onTranslationDelta?(text, snapshot)
+                            guard let self = self, self.requestGeneration == generation else { return }
+                            self.onTranslationDelta?(text, snapshot)
                         }
                     }
                 } else {
-                    result = try await self.translator.translate(text: text, mode: mode, targetLanguage: targetLang)
+                    result = try await translator.translate(text: text, mode: mode, targetLanguage: targetLang)
                 }
 
                 // 任务被取消时不再回调（用户已输入新内容，旧结果无意义）
-                if Task.isCancelled {
-                    debugLog("[Scheduler] 翻译已取消（旧任务）: '\(text)'")
-                    return
+                guard !Task.isCancelled, self.requestGeneration == generation else { return }
+                guard !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw TranslationError.invalidResponse
                 }
-                debugLog("[Scheduler] 翻译完成: '\(text)' → '\(result)'")
+                debugLog("[Scheduler] 翻译完成，长度=\(result.count)")
+                // 阻止已入主队列的旧增量在最终状态之后继续刷新界面。
+                self.requestGeneration &+= 1
                 // 缓存结果
-                self.cache.set(text: text, translation: result, targetLanguage: targetLang.rawValue)
+                self.cache.set(text: text, translation: result, targetLanguage: targetLang.rawValue, context: cacheContext)
                 // 回调主线程
-                DispatchQueue.main.async {
-                    self.onTranslationReady?(text, result)
-                }
+                self.onTranslationReady?(text, result)
             } catch {
                 // 任务被取消（包括 URLSession 取消错误）时不回调
-                if Task.isCancelled {
-                    debugLog("[Scheduler] 翻译已取消（旧任务，错误阶段）: '\(text)'")
-                    return
-                }
+                guard !Task.isCancelled, self.requestGeneration == generation else { return }
                 // 翻译失败，通知 UI 更新（避免悬浮窗一直卡在 loading 状态）
+                self.requestGeneration &+= 1
                 let errorMsg = error.localizedDescription
-                debugLog("[Scheduler] 翻译失败: '\(text)' 错误: \(errorMsg)")
-                print("[TranslationScheduler] 翻译失败：\(errorMsg)")
-                DispatchQueue.main.async {
-                    self.onTranslationFailed?(text, errorMsg)
-                }
+                debugLog("[Scheduler] 翻译失败")
+                self.onTranslationFailed?(text, errorMsg)
             }
         }
         currentTranslationTask = task

@@ -35,12 +35,6 @@ let package = Package(
             exclude: ["Info.plist", "Bridging-Header.h", "Resources/zh-Hans.lproj", "Resources/en.lproj", "Resources/AppIcon.icns", "Resources/InfoPlist.strings"],
             resources: [
                 .copy("Resources/rime")
-            ],
-            cSettings: [
-                .unsafeFlags(["-I/opt/homebrew/include"])
-            ],
-            linkerSettings: [
-                .unsafeFlags(["-L/opt/homebrew/lib", "-lrime"])
             ]
         )
     ]

@@ -39,7 +39,10 @@ class LOCandidateView: NSView {
 
     /// 候选词列表
     var candidates: [Candidate] = [] {
-        didSet { needsLayout = true }
+        didSet {
+            needsLayout = true
+            needsDisplay = true
+        }
     }
 
     /// 当前高亮的候选词索引

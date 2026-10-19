@@ -58,7 +58,7 @@ class RimeEngine {
         guard !initialized else { return }
 
         // 确保用户数据目录存在
-        RimeConfig.ensureUserDirExists()
+        RimeConfig.ensureUserDirExists(at: userDir)
 
         // 设置 Rime 特征参数
         var traits = RimeTraits()
@@ -137,9 +137,9 @@ class RimeEngine {
         var commit = RimeCommit()
         rimeStructInit(type: RimeCommit.self, value: &commit)
         guard api.pointee.get_commit(session, &commit) != 0 else { return nil }
-        let text = String(cString: commit.text)
-        _ = api.pointee.free_commit(&commit)
-        return text
+        defer { _ = api.pointee.free_commit(&commit) }
+        guard let text = commit.text else { return nil }
+        return String(cString: text)
     }
 
     /// 获取当前上下文（包含候选词菜单和组合信息）
@@ -165,7 +165,7 @@ class RimeEngine {
     ///   - count: 最多获取的候选词数量
     /// - Returns: 候选词数组
     func getCandidates(session: RimeSessionId, count: Int = 10) -> [Candidate] {
-        guard session != 0 else { return [] }
+        guard session != 0, count > 0 else { return [] }
         var ctx = RimeContext()
         rimeStructInit(type: RimeContext.self, value: &ctx)
         guard api.pointee.get_context(session, &ctx) != 0 else {
@@ -174,15 +174,24 @@ class RimeEngine {
         defer { _ = api.pointee.free_context(&ctx) }
 
         let menu = ctx.menu
+        guard menu.num_candidates > 0, let candidates = menu.candidates else { return [] }
         var result: [Candidate] = []
         let numCandidates = min(Int(menu.num_candidates), count)
         for i in 0..<numCandidates {
-            let c = menu.candidates.advanced(by: i).pointee
-            let text = String(cString: c.text)
+            let c = candidates.advanced(by: i).pointee
+            guard let candidateText = c.text else { continue }
+            let text = String(cString: candidateText)
             let comment = c.comment != nil ? String(cString: c.comment!) : nil
             result.append(Candidate(text: text, comment: comment))
         }
         return result
+    }
+
+    /// Rime 的 Tab 等按键会移动引擎内的高亮位置，窗口必须与其保持一致。
+    func getHighlightedCandidateIndex(session: RimeSessionId) -> Int {
+        guard var context = getContext(session: session) else { return 0 }
+        defer { freeContext(&context) }
+        return max(0, Int(context.menu.highlighted_candidate_index))
     }
 
     /// 获取预编辑文本
@@ -226,7 +235,7 @@ class RimeEngine {
     ///   - index: 候选词在当前页的索引
     ///   - session: 会话 ID
     func selectCandidateOnCurrentPage(index: Int, session: RimeSessionId) {
-        guard session != 0 else { return }
+        guard session != 0, index >= 0 else { return }
         _ = api.pointee.select_candidate_on_current_page(session, index)
     }
 
@@ -256,7 +265,6 @@ class RimeEngine {
     /// - Returns: 提交的文本，如果没有则返回 nil
     func commitComposition(session: RimeSessionId) -> String? {
         guard session != 0 else { return nil }
-        // 发送 Escape 取消组合，或者使用 commit_composition
         _ = api.pointee.commit_composition(session)
         return getCommit(session: session)
     }
@@ -294,8 +302,8 @@ class RimeEngine {
             }
             if scalar.value >= UInt32(UnicodeScalar("A").value)
                 && scalar.value <= UInt32(UnicodeScalar("Z").value) {
-                // 转为小写
-                return Int32(scalar.value + 32)
+                // 保留大写字符：英文模式下 CapsLock/Shift 产生的大小写由 NSEvent 决定。
+                return Int32(scalar.value)
             }
         }
 
@@ -311,10 +319,16 @@ class RimeEngine {
         // 特殊键映射
         switch keyCode {
         case 36: return Int32(XK_Return)      // 回车
+        case 76: return Int32(XK_Return)      // 数字键盘 Enter
         case 48: return Int32(XK_Tab)         // Tab
         case 49: return Int32(XK_space)       // 空格
         case 51: return Int32(XK_BackSpace)   // 退格
         case 53: return Int32(XK_Escape)      // Esc
+        case 117: return Int32(0xFFFF)        // Forward Delete
+        case 115: return Int32(0xFF50)        // Home
+        case 119: return Int32(0xFF57)        // End
+        case 116: return Int32(0xFF55)        // Page Up
+        case 121: return Int32(0xFF56)        // Page Down
         case 123: return Int32(XK_Left)       // 左箭头
         case 124: return Int32(XK_Right)      // 右箭头
         case 125: return Int32(XK_Down)       // 下箭头
