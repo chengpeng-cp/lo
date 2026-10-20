@@ -32,7 +32,7 @@ let package = Package(
                 .target(name: "CRime")
             ],
             path: "LOInputMethod",
-            exclude: ["Info.plist", "Bridging-Header.h", "Resources/zh-Hans.lproj", "Resources/en.lproj", "Resources/AppIcon.icns", "Resources/InfoPlist.strings"],
+            exclude: ["Info.plist", "Bridging-Header.h", "Resources/zh-Hans.lproj", "Resources/en.lproj", "Resources/AppIcon.icns", "Resources/MenuIcon.tif", "Resources/InfoPlist.strings"],
             resources: [
                 .copy("Resources/rime")
             ]

@@ -15,7 +15,7 @@ enum InstallStep: Equatable {
 
 // MARK: - 安装器视图模型
 
-/// 负责执行系统级安装：以管理员权限将输入法拷贝到 /Library/Input Methods/ 并签名、注册、启动。
+/// 负责执行系统级安装：以管理员权限将输入法拷贝到 /Library/Input Methods/ 并签名、注册、启用、启动。
 final class InstallerViewModel: ObservableObject {
 
     @Published var step: InstallStep = .welcome
@@ -196,6 +196,16 @@ final class InstallerViewModel: ObservableObject {
             return
         }
 
+        // 输入法带有独立模式。先调用 TIS API，再把父来源和具体模式写入
+        // AppleEnabledInputSources。某些 macOS 版本对键盘输入模式的
+        // TISEnableInputSource 返回 noErr 但不更新用户启用列表。
+        if let error = enableInputSources() {
+            DispatchQueue.main.async {
+                self.step = .failed("输入法已注册，但系统未能将它加入已启用列表：\(error)。请在系统设置的键盘输入法列表中手动添加“语境输入法”。")
+            }
+            return
+        }
+
         // 重新启动菜单代理，使刚注册的 source ID 和本地化名称立即刷新。
         let refresh = Process()
         refresh.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
@@ -236,6 +246,80 @@ final class InstallerViewModel: ObservableObject {
             }
         }
         return nil
+    }
+
+    /// TIS 把带模式的输入法拆成 bundle 父来源和具体输入模式。键盘设置
+    /// 读取 AppleEnabledInputSources；不能只凭 TIS 返回 noErr 判定已加入列表。
+    private func enableInputSources() -> String? {
+        for sourceID in [bundleId, "\(bundleId).pinyin"] {
+            guard let source = inputSource(id: sourceID, includeAll: true) else { continue }
+            let status = TISEnableInputSource(source)
+            if status != noErr {
+                NSLog("[LOInstaller] TISEnableInputSource(%@) returned %d; persisting enabled source list", sourceID, status)
+            }
+        }
+
+        let modeID = "\(bundleId).pinyin"
+        let hitoolboxEntries: [[String: String]] = [
+            ["Bundle ID": bundleId, "InputSourceKind": "Keyboard Input Method"],
+            ["Bundle ID": bundleId, "Input Mode": modeID, "InputSourceKind": "Input Mode"]
+        ]
+        let thirdPartyEntries: [[String: String]] = [
+            ["Bundle ID": bundleId, "Input Mode": modeID, "InputSourceKind": "Input Mode"],
+            ["Bundle ID": bundleId, "InputSourceKind": "Keyboard Input Method"]
+        ]
+
+        let errors = [
+            persistEnabledInputSourcePreferences(
+                domain: "com.apple.HIToolbox",
+                key: "AppleEnabledInputSources",
+                required: hitoolboxEntries
+            ),
+            persistEnabledInputSourcePreferences(
+                domain: "com.apple.inputsources",
+                key: "AppleEnabledThirdPartyInputSources",
+                required: thirdPartyEntries
+            )
+        ].compactMap { $0 }
+        return errors.isEmpty ? nil : errors.joined(separator: "; ")
+    }
+
+    /// Persist the entries used by System Settings for enabled keyboard sources.
+    /// TISEnableInputSource may return noErr without changing these preferences, so
+    /// verify both the legacy HIToolbox list and the third-party input source list.
+    private func persistEnabledInputSourcePreferences(
+        domain domainName: String,
+        key keyName: String,
+        required: [[String: String]]
+    ) -> String? {
+        let domain = domainName as CFString
+        let key = keyName as CFString
+        var entries = CFPreferencesCopyAppValue(key, domain) as? [[String: Any]] ?? []
+        for item in required where !entries.contains(where: { current in
+            item.allSatisfy { current[$0.key] as? String == $0.value }
+        }) {
+            entries.append(item)
+        }
+
+        CFPreferencesSetAppValue(key, entries as CFArray, domain)
+        guard CFPreferencesAppSynchronize(domain) else {
+            return "无法保存 \(domainName).\(keyName)"
+        }
+
+        let persisted = CFPreferencesCopyAppValue(key, domain) as? [[String: Any]] ?? []
+        for item in required where !persisted.contains(where: { current in
+            item.allSatisfy { current[$0.key] as? String == $0.value }
+        }) {
+            return "系统偏好 \(domainName).\(keyName) 未保存输入源 \(item["Input Mode"] ?? item["Bundle ID"] ?? "unknown")"
+        }
+        return nil
+    }
+
+    private func inputSource(id: String, includeAll: Bool) -> TISInputSource? {
+        let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
+        guard let unmanaged = TISCreateInputSourceList(filter, includeAll) else { return nil }
+        let sources = unmanaged.takeRetainedValue() as? [TISInputSource] ?? []
+        return sources.first
     }
 
     /// A successful `open` only acknowledges a launch request. Catch immediate crashes.

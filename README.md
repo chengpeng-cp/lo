@@ -15,7 +15,7 @@
 [![Windows Build](https://github.com/chengpeng-cp/lo/actions/workflows/build-windows.yml/badge.svg)](https://github.com/chengpeng-cp/lo/actions/workflows/build-windows.yml)
 
 <p align="center">
-  <img src="macos/LOInputMethod/Resources/AppIcon.icns" width="128" alt="Logo" />
+  <img src="assets/images/lo-logo.png" width="128" alt="语境输入法 Logo" />
 </p>
 
 ## ✨ 功能特点
@@ -42,8 +42,7 @@
 1. 下载 `LOInputMethod-<version>.dmg`
 2. 双击挂载 DMG，将「语境输入法安装器」拖到「应用程序」文件夹
 3. 打开「应用程序」中的「语境输入法安装器」，按提示完成安装
-4. 打开「系统设置 → 键盘 → 输入法」，点击 **+** 添加「语境输入法」
-5. 授予输入法辅助功能权限（系统会自动提示）
+4. 安装器会登记并启用「语境输入法」；打开「系统设置 → 键盘 → 输入法」确认后，用 `Ctrl + Space` 切换。如果安装后列表仍未刷新，请注销并重新登录再检查
 
 > ⚠️ 当前版本未使用 Apple 开发者证书签名，首次打开需在「系统设置 → 隐私与安全性」底部点击"仍要打开"以允许运行。
 
@@ -109,7 +108,7 @@ brew install librime
 make install-full
 ```
 
-安装完成后，前往「系统设置 → 键盘 → 输入法」添加「语境输入法」，然后用 `Ctrl + Space` 切换。`make install-full` 会构建程序、下载词库并将完整应用安装到当前用户的输入法目录。
+`make install-full` 会构建程序、下载词库并将完整应用安装到当前用户的输入法目录；首次启动时会注册并启用输入法父来源和拼音模式。安装后可在「系统设置 → 键盘 → 输入法」确认「语境输入法」已列出，再用 `Ctrl + Space` 切换。
 
 需要制作 DMG 安装包时，在 `macos/` 目录运行：
 

@@ -115,6 +115,10 @@ class LOInputController: IMKInputController {
     /// Shift 只通过 flagsChanged 上报，普通 keyDown 会取消本次短按切换。
     private var shiftTapTracker = LOShiftTapTracker()
 
+    /// Caps Lock 的输入源切换有时会先触发 commitComposition，再送达 flagsChanged。
+    /// 记录上次状态，以便在系统回调顺序靠前时识别这次切源。
+    private var lastCapsLockState = false
+
     private var settingsObserver: NSObjectProtocol?
 
     /// 当前处于激活状态的控制器（用于 CGEventTap 切走前提交预编辑文本）
@@ -246,6 +250,7 @@ class LOInputController: IMKInputController {
         applySettingsToOverlay()
         // 激活时可能正按着 Shift，不能将它的释放误判为一次独立短按。
         shiftTapTracker.reset(modifiers: NSEvent.modifierFlags)
+        lastCapsLockState = NSEvent.modifierFlags.contains(.capsLock)
 
         // 为当前客户端获取或创建 Rime 会话
         if let client = client {
@@ -301,6 +306,13 @@ class LOInputController: IMKInputController {
 
     /// 客户端在移动光标、结束编辑等情况下也会显式要求提交组合文本。
     override func commitComposition(_ sender: Any!) {
+        let capsLockIsOn = NSEvent.modifierFlags.contains(.capsLock)
+        if capsLockIsOn != lastCapsLockState {
+            lastCapsLockState = capsLockIsOn
+            debugLog("commitComposition: 检测到 Caps Lock 输入源切换，提交原始预编辑文本")
+            commitRawPreedit(to: (sender as? IMKTextInput) ?? client())
+            return
+        }
         commitCurrentComposition(to: (sender as? IMKTextInput) ?? client())
     }
 
@@ -325,6 +337,18 @@ class LOInputController: IMKInputController {
 
     /// default.yaml 将 Shift 配置为 noop，由此处识别短按。
     private func handleFlagsChanged(_ event: NSEvent, client: Any?) -> Bool {
+        // Caps Lock 在 macOS 上负责切换到 ASCII 输入源。先于系统执行切源，
+        // 把 Rime 的预编辑区按用户输入的原始拼音提交（例如 nihao），否则
+        // 系统停用输入法时可能先按当前高亮候选提交成中文。
+        if event.keyCode == 57 {
+            let capsLockIsOn = event.modifierFlags.contains(.capsLock)
+            if capsLockIsOn != lastCapsLockState {
+                commitRawPreedit(to: client as? IMKTextInput)
+            }
+            lastCapsLockState = capsLockIsOn
+            return false // 保留给 macOS 完成输入源切换
+        }
+
         guard shiftTapTracker.shouldToggle(for: event, threshold: userSettings.shiftLongPressThreshold) else {
             return false
         }

@@ -192,7 +192,9 @@ class LOCandidateView: NSView {
         // 高亮时用强调色（蓝），非高亮用灰色。下划线样式下序号本身即高亮标识。
         let color = highlighted ? Theme.highlightColor : Theme.indexColor
         return [
-            .font: NSFont.monospacedSystemFont(ofSize: Layout.indexFontSize, weight: highlighted ? .semibold : .regular),
+            // Match the standard system-font path used for candidate text. The crash
+            // report points to AppKit bridging this index-font attribute dictionary.
+            .font: NSFont.systemFont(ofSize: Layout.indexFontSize, weight: highlighted ? .semibold : .regular),
             .foregroundColor: color
         ]
     }

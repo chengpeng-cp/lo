@@ -68,7 +68,7 @@ struct WelcomeView: View {
                     .foregroundColor(Theme.secondaryText)
             }
 
-            Text("原生 AI 输入法 · 实时翻译 · 中英混输\n安装后请在系统输入法中启用")
+            Text("原生 AI 输入法 · 实时翻译 · 中英混输\n安装后自动加入系统输入法列表")
                 .font(.system(size: 14))
                 .foregroundColor(Theme.secondaryText)
                 .multilineTextAlignment(.center)
@@ -143,7 +143,7 @@ struct FinishedView: View {
             VStack(spacing: 6) {
                 Text("语境输入法已安装到系统")
                     .font(.system(size: 14))
-                Text("请在「系统设置 › 键盘 › 输入法」中添加「语境输入法」")
+                Text("语境输入法已登记并加入系统启用列表。若键盘设置尚未显示，请注销并重新登录刷新列表。")
                     .font(.system(size: 13))
                     .foregroundColor(Theme.secondaryText)
                     .multilineTextAlignment(.center)
@@ -153,7 +153,7 @@ struct FinishedView: View {
 
             VStack(spacing: 12) {
                 Button(action: { viewModel.openInputSourcesSettings() }) {
-                    Text("打开系统设置添加输入法")
+                    Text("打开键盘设置查看")
                 }
                 .buttonStyle(PrimaryButtonStyle(color: Theme.accent))
                 .controlSize(.large)

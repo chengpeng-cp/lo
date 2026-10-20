@@ -62,7 +62,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func ensureInputSourceRegistered() {
-        let modeID = "\(Bundle.main.bundleIdentifier ?? "com.lo.inputmethod.ime").pinyin"
+        let bundleId = Bundle.main.bundleIdentifier ?? "com.lo.inputmethod.ime"
+        let modeID = "\(bundleId).pinyin"
         let filter = [kTISPropertyInputSourceID as String: modeID] as CFDictionary
 
         func localizedModeName() -> String? {
@@ -82,15 +83,108 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return nil
         }
 
-        guard localizedModeName() == nil else { return }
-        let status = TISRegisterInputSource(Bundle.main.bundleURL as CFURL)
-        if status != noErr {
-            debugLog("输入源注册失败：status=\(status)")
-        } else if let name = localizedModeName() {
-            debugLog("输入源已注册：\(name)")
-        } else {
-            debugLog("输入源已注册，但系统仍未读取到非空名称：\(modeID)")
+        if localizedModeName() == nil || inputSource(id: bundleId, includeAll: true) == nil {
+            let status = TISRegisterInputSource(Bundle.main.bundleURL as CFURL)
+            if status != noErr {
+                debugLog("输入源注册失败：status=\(status)")
+            } else if let name = localizedModeName() {
+                debugLog("输入源已注册：\(name)")
+            } else {
+                debugLog("输入源已注册，但系统仍未读取到非空名称：\(modeID)")
+            }
         }
+
+        // TIS 的「已选中」与「已启用」是两份状态。若旧安装残留了选中模式，
+        // 但父输入法或模式未进入启用列表，就会出现菜单栏可见、键盘设置缺失。
+        if let error = enableInputSources() {
+            debugLog("输入源已注册，但未能加入启用列表：\(error)")
+        } else {
+            debugLog("输入法父来源和拼音模式均已启用")
+        }
+    }
+
+    /// 带模式的输入法需要先启用 bundle 父来源，再启用具体输入模式。
+    /// TIS API 在部分 macOS 版本上可能对键盘模式静默无操作；同时持久化
+    /// System Settings 实际读取的输入源偏好并回读验证。
+    private func enableInputSources() -> String? {
+        guard let bundleId = Bundle.main.bundleIdentifier else {
+            return "无法读取输入法 Bundle ID"
+        }
+
+        for sourceID in [bundleId, "\(bundleId).pinyin"] {
+            if let source = inputSource(id: sourceID, includeAll: true) {
+                let status = TISEnableInputSource(source)
+                if status != noErr {
+                    debugLog("TISEnableInputSource(\(sourceID)) 返回 \(status)，将写入已启用列表偏好")
+                }
+            }
+        }
+
+        let hitoolboxEntries: [[String: String]] = [
+            ["Bundle ID": bundleId, "InputSourceKind": "Keyboard Input Method"],
+            [
+                "Bundle ID": bundleId,
+                "Input Mode": "\(bundleId).pinyin",
+                "InputSourceKind": "Input Mode"
+            ]
+        ]
+        let thirdPartyEntries: [[String: String]] = [
+            [
+                "Bundle ID": bundleId,
+                "Input Mode": "\(bundleId).pinyin",
+                "InputSourceKind": "Input Mode"
+            ],
+            ["Bundle ID": bundleId, "InputSourceKind": "Keyboard Input Method"]
+        ]
+
+        let errors = [
+            persistEnabledInputSourcePreferences(
+                domain: "com.apple.HIToolbox",
+                key: "AppleEnabledInputSources",
+                required: hitoolboxEntries
+            ),
+            persistEnabledInputSourcePreferences(
+                domain: "com.apple.inputsources",
+                key: "AppleEnabledThirdPartyInputSources",
+                required: thirdPartyEntries
+            )
+        ].compactMap { $0 }
+        return errors.isEmpty ? nil : errors.joined(separator: "; ")
+    }
+
+    private func persistEnabledInputSourcePreferences(
+        domain domainName: String,
+        key keyName: String,
+        required: [[String: String]]
+    ) -> String? {
+        let domain = domainName as CFString
+        let key = keyName as CFString
+        var entries = CFPreferencesCopyAppValue(key, domain) as? [[String: Any]] ?? []
+        for item in required where !entries.contains(where: { current in
+            item.allSatisfy { current[$0.key] as? String == $0.value }
+        }) {
+            entries.append(item)
+        }
+
+        CFPreferencesSetAppValue(key, entries as CFArray, domain)
+        guard CFPreferencesAppSynchronize(domain) else {
+            return "无法保存 \(domainName).\(keyName)"
+        }
+
+        let persisted = CFPreferencesCopyAppValue(key, domain) as? [[String: Any]] ?? []
+        for item in required where !persisted.contains(where: { current in
+            item.allSatisfy { current[$0.key] as? String == $0.value }
+        }) {
+            return "系统偏好 \(domainName).\(keyName) 未保存输入源 \(item["Input Mode"] ?? item["Bundle ID"] ?? "unknown")"
+        }
+        return nil
+    }
+
+    private func inputSource(id: String, includeAll: Bool) -> TISInputSource? {
+        let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
+        guard let unmanaged = TISCreateInputSourceList(filter, includeAll) else { return nil }
+        let sources = unmanaged.takeRetainedValue() as? [TISInputSource] ?? []
+        return sources.first
     }
 
     func applicationWillTerminate(_ notification: Notification) {
