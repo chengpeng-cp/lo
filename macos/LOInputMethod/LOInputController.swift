@@ -33,50 +33,6 @@ func debugLog(_ message: String) {
     }
 }
 
-/// 独立短按 Shift 的状态机。普通按键或其他修饰键会取消切换。
-struct LOShiftTapTracker {
-    private var lastModifiers: NSEvent.ModifierFlags = []
-    private var shiftDownTimestamp: TimeInterval?
-
-    mutating func reset(modifiers: NSEvent.ModifierFlags = []) {
-        lastModifiers = modifiers.intersection(.deviceIndependentFlagsMask)
-        shiftDownTimestamp = nil
-    }
-
-    mutating func noteKeyDown(modifiers: NSEvent.ModifierFlags) {
-        reset(modifiers: modifiers)
-    }
-
-    mutating func shouldToggle(for event: NSEvent, threshold: TimeInterval) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let wasShiftDown = lastModifiers.contains(.shift)
-        let isShiftDown = flags.contains(.shift)
-        defer { lastModifiers = flags }
-        guard !flags.contains(.command), !flags.contains(.control), !flags.contains(.option) else {
-            shiftDownTimestamp = nil
-            return false
-        }
-        let changes = lastModifiers.symmetricDifference(flags)
-        let keyCode = RimeEngine.isModifierKeycode(event.keyCode)
-            ? event.keyCode : RimeEngine.inferModifierKeycode(from: changes)
-        guard keyCode == 56 || keyCode == 60 else {
-            shiftDownTimestamp = nil
-            return false
-        }
-        if isShiftDown && !wasShiftDown {
-            shiftDownTimestamp = event.timestamp
-        } else if wasShiftDown && !isShiftDown {
-            defer { shiftDownTimestamp = nil }
-            guard let start = shiftDownTimestamp else { return false }
-            return event.timestamp - start >= 0 && event.timestamp - start < threshold
-        } else {
-            // 同时按下左右 Shift 时不把后续释放当成独立短按。
-            shiftDownTimestamp = nil
-        }
-        return false
-    }
-}
-
 /// IMK clients do not all treat NSNotFound identically for insertText.
 /// Replace the active marked text when composing, otherwise use the document selection.
 enum LOTextInsertion {
@@ -111,9 +67,6 @@ class LOInputController: IMKInputController {
 
     /// 用户设置
     private var userSettings = LOSettings.load()
-
-    /// Shift 只通过 flagsChanged 上报，普通 keyDown 会取消本次短按切换。
-    private var shiftTapTracker = LOShiftTapTracker()
 
     /// Caps Lock 的输入源切换有时会先触发 commitComposition，再送达 flagsChanged。
     /// 记录上次状态，以便在系统回调顺序靠前时识别这次切源。
@@ -198,10 +151,29 @@ class LOInputController: IMKInputController {
 
     // MARK: - 激活控制器与预编辑提交
 
-    /// 让当前激活的控制器把未提交的预编辑文本提交给客户端。
-    /// 由 LOInputSourceSwitcher 在真正切到 ABC 前调用，避免 deactivateServer 阶段插入无效。
+    /// 让当前激活的控制器提交未上屏的预编辑文本。
+    /// 由 Shift 切系统 ABC 前调用，避免 deactivateServer 阶段插入无效。
     static func commitActiveRawPreedit() {
-        activeController?.commitRawPreedit()
+        guard let controller = activeController,
+              controller.currentSession != 0,
+              controller.rimeEngine.isComposing(session: controller.currentSession) else {
+            return
+        }
+        controller.commitRawPreedit()
+    }
+
+    /// 由 LOShiftMonitor 调用：切换当前客户端的 Rime 中英文模式
+    static func toggleActiveAsciiMode() {
+        activeController?.toggleAsciiModeFromMonitor()
+    }
+
+    private func toggleAsciiModeFromMonitor() {
+        guard currentSession != 0 else { return }
+        commitRawPreedit(to: client() as? IMKTextInput)
+        let nextAscii = !rimeEngine.isAsciiMode(session: currentSession)
+        rimeEngine.setAsciiMode(nextAscii, session: currentSession)
+        debugLog("Shift 短按：切换为\(nextAscii ? "英文(ascii_mode)" : "中文")")
+        updateUI(client: client())
     }
 
     /// 提交当前未转换的原始按键输入，使其保留在输入框中。
@@ -248,8 +220,6 @@ class LOInputController: IMKInputController {
         }
 
         applySettingsToOverlay()
-        // 激活时可能正按着 Shift，不能将它的释放误判为一次独立短按。
-        shiftTapTracker.reset(modifiers: NSEvent.modifierFlags)
         lastCapsLockState = NSEvent.modifierFlags.contains(.capsLock)
 
         // 为当前客户端获取或创建 Rime 会话
@@ -284,8 +254,7 @@ class LOInputController: IMKInputController {
     /// 输入法被停用时调用
     override func deactivateServer(_ client: Any!) {
         // 如果切走前没有提交过预编辑文本，在这里做最后一次兜底提交。
-        // 实际提交动作通常在 LOInputSourceSwitcher 切到 ABC 前完成，
-        // 因为 deactivateServer 阶段客户端可能已不接受 insertText。
+        // deactivateServer 阶段部分客户端已不接受 insertText，因此尽量提前提交。
         commitRawPreedit(to: client as? IMKTextInput)
         super.deactivateServer(client)
 
@@ -296,7 +265,6 @@ class LOInputController: IMKInputController {
             sessionManager.removeSession(for: client)
         }
         currentSession = 0
-        shiftTapTracker.reset()
 
         // 取消激活控制器标记
         if LOInputController.activeController === self {
@@ -349,13 +317,9 @@ class LOInputController: IMKInputController {
             return false // 保留给 macOS 完成输入源切换
         }
 
-        guard shiftTapTracker.shouldToggle(for: event, threshold: userSettings.shiftLongPressThreshold) else {
-            return false
-        }
-        commitRawPreedit(to: client as? IMKTextInput)
-        rimeEngine.setAsciiMode(!rimeEngine.isAsciiMode(session: currentSession), session: currentSession)
-        updateUI(client: client)
-        return true
+        // Shift 短按由 LOShiftMonitor 轮询识别：不依赖 App 转发 flagsChanged，
+        // 因此在微信/飞书里也能稳定切换，且不需要辅助功能权限。
+        return false
     }
 
     // MARK: - 按键处理
@@ -380,7 +344,7 @@ class LOInputController: IMKInputController {
             return handleFlagsChanged(event, client: client)
         }
         guard event.type == .keyDown else { return false }
-        shiftTapTracker.noteKeyDown(modifiers: event.modifierFlags)
+        LOShiftMonitor.shared.noteKeyDown(keyCode: event.keyCode)
 
         // 快捷复制翻译内容：Control+Command+逗号（⌃⌘,）
         // 在 Command 放行逻辑之前拦截，确保不被放行给系统
@@ -489,10 +453,6 @@ class LOInputController: IMKInputController {
 
         return handled
     }
-
-    // MARK: - 切换系统英文输入法
-    // CapsLock 互切已交由 LOInputSourceSwitcher（CGEventTap）统一处理，
-    // controller 不再持有相关逻辑。
 
     // MARK: - UI 更新
 

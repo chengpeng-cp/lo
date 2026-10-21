@@ -8,3 +8,5 @@
 - Windows 清理逻辑集中在 `windows/installer/cleanup.nsh` 的宏里，`installer.nsi` 卸载区段与 `uninstaller.nsi` 必须同时复用，避免两套实现漂移。
 - 卸载工具默认清空 Rime 词库与用户词典（`--purge`），但检测到其他 Rime 输入法数据时只删 `build/`、`installation.yaml`、`user.yaml`、`luna_pinyin*`、`LOInputMethod.log`。
 - 本机构建 Swift 包时若报 sandbox-exec 权限错误，使用 `swift build --disable-sandbox`。
+- macOS 的中英文切换是**输入法内部模式**（对齐微信输入法）：`LOShiftMonitor` 每 30ms 轮询 Shift 状态识别短按，直接切 Rime `ascii_mode`，不切系统输入源、不需要辅助功能权限、不依赖 App 转发 flagsChanged。菜单栏仍显示「语境」，这是刻意设计。CapsLock 切系统 ABC 仍交给 macOS 原生逻辑，微信/飞书等应用可能不生效。
+- 本地打包含稳定开发证书：`CODESIGN_IDENTITY="LO Input Method Development"`，否则 ad-hoc 签名变化会让辅助功能授权在重装后失效；CI 无证书时回退 ad-hoc。

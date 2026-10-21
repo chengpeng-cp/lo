@@ -123,9 +123,9 @@ struct LOSettings {
     /// 默认输入模式：chinese / english
     var defaultInputMode: String = "chinese"
 
-    /// Shift 键行为：toggle_ascii（切 Rime 内部中英文，对齐微信）/ switch_source（切系统ABC）
-    /// 默认 toggle_ascii：不切系统输入源，输入法进程始终驻留，可再次按 Shift 切回中文
-    var shiftBehavior: String = "toggle_ascii"
+    /// Shift 键行为：switch_source（切系统 ABC ↔ 语境）/ toggle_ascii（只切 Rime 内部中英文）
+    /// 默认 switch_source：短按 Shift 直接切到系统 ABC，再按切回语境
+    var shiftBehavior: String = "switch_source"
 
     /// Shift 长按阈值（秒），超过则触发 CapsLock 大写
     var shiftLongPressThreshold: Double = 0.4
@@ -226,7 +226,7 @@ struct LOSettings {
         if settings.translationDebounceInterval == 0 { settings.translationDebounceInterval = 0.5 }
 
         settings.defaultInputMode = defaults.string(forKey: Keys.defaultInputMode) ?? "chinese"
-        settings.shiftBehavior = defaults.string(forKey: Keys.shiftBehavior) ?? "toggle_ascii"
+        settings.shiftBehavior = defaults.string(forKey: Keys.shiftBehavior) ?? "switch_source"
         settings.shiftLongPressThreshold = defaults.double(forKey: Keys.shiftLongPressThreshold)
         if settings.shiftLongPressThreshold == 0 { settings.shiftLongPressThreshold = 0.4 }
 

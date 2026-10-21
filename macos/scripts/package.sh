@@ -71,10 +71,13 @@ cp "$ROOT_DIR/LOInputMethod/Resources/AppIcon.icns" "$INSTALLER_APP/Contents/Res
 cp -R "$PAYLOAD_APP" "$INSTALLER_APP/Contents/Resources/$APP_NAME.app"
 
 # 签名安装器（内层 payload 已签名，此处签名外层 installer）
+# 本地开发建议 CODESIGN_IDENTITY="LO Input Method Development"：
+# 稳定证书能让辅助功能授权在重装后继续有效；CI 无证书时回退 ad-hoc。
 echo "  签名安装器..."
+IDENTITY="${CODESIGN_IDENTITY:--}"
 codesign --force --deep --options runtime \
     --identifier "$INSTALLER_BUNDLE_ID" \
-    -s - "$INSTALLER_APP"
+    -s "$IDENTITY" "$INSTALLER_APP"
 
 codesign --verify --deep --strict "$INSTALLER_APP"
 

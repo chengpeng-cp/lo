@@ -55,10 +55,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             handle.closeFile()
         }
 
-        // CapsLock 中英切换：靠 Info.plist 的 TICapsLockLanguageSwitchCapable=true
-        // 交给 macOS 系统原生处理（对齐 fcitx5-macos 方案）。
-        // 不使用 CGEventTap（那样需要辅助功能权限且 TCC 绑定签名易失效）。
-        // LOInputSourceSwitcher 代码保留备用，如需启用可在此调用 .shared.start()。
+        // 中英文切换：短按 Shift 在语境与系统 ABC 之间互切。
+        // 轮询修饰键状态，不依赖 App 转发 flagsChanged，也不需要辅助功能权限。
+        LOShiftMonitor.shared.start()
     }
 
     private func ensureInputSourceRegistered() {
@@ -188,6 +187,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        LOShiftMonitor.shared.stop()
         // 终止 Rime 引擎
         rimeEngine.finalize()
     }

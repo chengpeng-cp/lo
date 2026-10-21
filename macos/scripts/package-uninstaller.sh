@@ -69,9 +69,10 @@ chmod 755 "$APP_PATH/Contents/Resources/uninstall.sh"
 
 echo ""
 echo "[3/4] 签名..."
+IDENTITY="${CODESIGN_IDENTITY:--}"
 codesign --force --deep --options runtime \
     --identifier "$BUNDLE_ID" \
-    -s - "$APP_PATH"
+    -s "$IDENTITY" "$APP_PATH"
 codesign --verify --deep --strict "$APP_PATH"
 
 if [ "$APP_ONLY" -eq 1 ]; then

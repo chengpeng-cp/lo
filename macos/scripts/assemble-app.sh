@@ -14,6 +14,8 @@ MIN_OS="$(otool -l "$DEST/Contents/MacOS/LOInputMethod" "$DEST/Contents/Framewor
 if [ -n "$MIN_OS" ]; then
     /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MIN_OS" "$DEST/Contents/Info.plist"
 fi
-codesign --force --deep --options runtime --identifier com.lo.inputmethod.ime -s - "$DEST"
+# CODESIGN_IDENTITY 可指定稳定的开发证书；默认 ad-hoc（CI 无证书）
+IDENTITY="${CODESIGN_IDENTITY:--}"
+codesign --force --deep --options runtime --identifier com.lo.inputmethod.ime -s "$IDENTITY" "$DEST"
 codesign --verify --deep --strict "$DEST"
 echo "Assembled $DEST (minimum macOS $MIN_OS, $(lipo -archs "$DEST/Contents/MacOS/LOInputMethod"))"
