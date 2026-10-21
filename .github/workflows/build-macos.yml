@@ -73,12 +73,12 @@ jobs:
         run: |
           cd macos/dist
           ls -la
-          # package.sh 输出文件名为 语境输入法-<Info.plist 版本>.dmg
-          # 统一改名为带 CI 版本号
+          # package.sh 输出：语境输入法-<版本>.dmg（内含安装器与卸载工具）
+          VER="${{ steps.ver.outputs.version }}"
+          ARCH="${{ steps.compatibility.outputs.arch }}"
           for f in *.dmg; do
-            if [[ -f "$f" ]]; then
-              mv "$f" "LOInputMethod-${{ steps.ver.outputs.version }}-${{ steps.compatibility.outputs.arch }}.dmg"
-            fi
+            [[ -f "$f" ]] || continue
+            mv "$f" "LOInputMethod-$VER-$ARCH.dmg"
           done
           ls -la
 
@@ -111,6 +111,9 @@ jobs:
             3. 打开「应用程序」中的「语境输入法安装器」,按提示完成安装
             4. 打开「系统设置 > 键盘 > 输入法」,添加「语境输入法」
             5. 授予输入法辅助功能权限（系统会自动提示）
+
+            **重装或测试前清理**：同一个 dmg 内还提供了「语境输入法卸载工具」，
+            可清除程序副本、输入源注册、Rime 词库缓存与旧 API Key，避免旧版本残留干扰新版本。
 
             **本次 macOS 安装包**：${{ steps.compatibility.outputs.arch }}，macOS ${{ steps.compatibility.outputs.min_os }} 或更高版本。请选择与你的 CPU 架构匹配的安装包。
 
