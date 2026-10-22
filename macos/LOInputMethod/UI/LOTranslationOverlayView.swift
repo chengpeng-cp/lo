@@ -27,18 +27,24 @@ class LOTranslationOverlayView: NSView {
 
     /// 布局间距
     private enum Layout {
-        static let padding: CGFloat = 16
+        static let padding: CGFloat = 14
         static let labelSpacing: CGFloat = 6
-        static let sectionSpacing: CGFloat = 12
+        static let sectionSpacing: CGFloat = 10
         static let titleFontSize: CGFloat = 11
-        static let cornerRadius: CGFloat = 12
-        static let copyButtonSize: CGFloat = 18
+        static let cornerRadius: CGFloat = 14
+        static let copyButtonSize: CGFloat = 16
 
         /// 翻译区最小高度（避免内容很少时过窄）
         static let translationMinHeight: CGFloat = 20
 
         /// 内容区最小宽度（避免内容很短时窗口过窄）
         static let minContentWidth: CGFloat = 120
+
+        /// 分隔线厚度（0.5pt 在 Retina 上为 1 像素，更细腻）
+        static let dividerThickness: CGFloat = 0.5
+
+        /// 译文行距
+        static let translationLineSpacing: CGFloat = 2.5
     }
 
     // MARK: - 可配置属性（由设置驱动）
@@ -288,6 +294,9 @@ class LOTranslationOverlayView: NSView {
         // 原文标签颜色
         originalLabel.textColor = originalTextColor
 
+        // 边框随背景明暗自适应，让浮窗边缘更清晰
+        updateBorderAppearance()
+
         // 复制按钮颜色随可用状态变化
         updateCopyButtonAppearance()
 
@@ -402,7 +411,7 @@ class LOTranslationOverlayView: NSView {
 
         var contentHeight: CGFloat = 0
         contentHeight += originalSize.height + Layout.sectionSpacing
-        contentHeight += 1 + Layout.sectionSpacing // divider
+        contentHeight += Layout.dividerThickness + Layout.sectionSpacing // divider
         contentHeight += translationHeight
 
         let result = NSSize(
@@ -414,8 +423,23 @@ class LOTranslationOverlayView: NSView {
 
     // MARK: - 私有方法
 
+    /// 根据背景明暗更新描边，避免浮窗边缘在浅色/深色背景上糊成一片
+    private func updateBorderAppearance() {
+        let brightness = backgroundColor.usingColorSpace(.sRGB)?.brightnessComponent ?? 0.1
+        let isDark = brightness < 0.5
+        layer?.borderWidth = 0.5
+        layer?.borderColor = (isDark
+            ? NSColor(white: 1.0, alpha: 0.10)
+            : NSColor(white: 0.0, alpha: 0.08)).cgColor
+    }
+
     /// 设置翻译文本，标记需要在布局完成后滚动到底部
     private func setTranslationText(_ text: String) {
+        // 用段落样式统一行距，长句多行时更易读
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = Layout.translationLineSpacing
+        style.lineBreakMode = .byWordWrapping
+        translationTextView.defaultParagraphStyle = style
         translationTextView.string = text
         // 布局完成后再滚动，避免尺寸未更新时滚动位置错误
         needsScrollToBottom = true
@@ -458,8 +482,9 @@ class LOTranslationOverlayView: NSView {
         y -= origH + Layout.sectionSpacing
 
         // 分割线
-        dividerView.frame = NSRect(x: padding, y: y - 1, width: contentWidth, height: 1)
-        y -= 1 + Layout.sectionSpacing
+        dividerView.frame = NSRect(x: padding, y: y - Layout.dividerThickness,
+                                   width: contentWidth, height: Layout.dividerThickness)
+        y -= Layout.dividerThickness + Layout.sectionSpacing
 
         // 翻译滚动视图（填满剩余空间）
         let scrollH = y - padding

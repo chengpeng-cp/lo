@@ -104,10 +104,10 @@ struct LOSettings {
     var overlayMaxHeight: Double = 200
 
     /// 原文字体大小
-    var overlayOriginalFontSize: Double = 14
+    var overlayOriginalFontSize: Double = 12
 
     /// 翻译字体大小
-    var overlayTranslationFontSize: Double = 14
+    var overlayTranslationFontSize: Double = 15
 
     /// 新段落间隔时间（秒）：超过该时间无新输入，下次提交将开启新段落
     var segmentPauseThreshold: Double = 5.0
@@ -215,9 +215,9 @@ struct LOSettings {
         settings.overlayMaxHeight = defaults.double(forKey: Keys.overlayMaxHeight)
         if settings.overlayMaxHeight == 0 { settings.overlayMaxHeight = 200 }
         settings.overlayOriginalFontSize = defaults.double(forKey: Keys.overlayOriginalFontSize)
-        if settings.overlayOriginalFontSize == 0 { settings.overlayOriginalFontSize = 14 }
+        if settings.overlayOriginalFontSize == 0 { settings.overlayOriginalFontSize = 12 }
         settings.overlayTranslationFontSize = defaults.double(forKey: Keys.overlayTranslationFontSize)
-        if settings.overlayTranslationFontSize == 0 { settings.overlayTranslationFontSize = 14 }
+        if settings.overlayTranslationFontSize == 0 { settings.overlayTranslationFontSize = 15 }
         settings.segmentPauseThreshold = defaults.double(forKey: Keys.segmentPauseThreshold)
         if settings.segmentPauseThreshold == 0 { settings.segmentPauseThreshold = 5.0 }
         settings.translationDebounceInterval = defaults.double(forKey: Keys.translationDebounceInterval)

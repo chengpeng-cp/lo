@@ -367,7 +367,7 @@ class LOSettingsView: NSView {
     // MARK: - UI 构建
 
     private func setupUI() {
-        // 整体使用 Auto Layout：左侧 sidebar + 右侧滚动内容区
+        // 整体使用 Auto Layout：左侧毛玻璃侧边栏 + 右侧卡片式滚动内容区
         let sidebar = makeSidebar()
         addSubview(sidebar)
 
@@ -375,6 +375,8 @@ class LOSettingsView: NSView {
         contentScrollView.hasVerticalScroller = true
         contentScrollView.borderType = .noBorder
         contentScrollView.autohidesScrollers = true
+        contentScrollView.drawsBackground = true
+        contentScrollView.backgroundColor = LODesign.Color.content
         contentScrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(contentScrollView)
 
@@ -382,7 +384,7 @@ class LOSettingsView: NSView {
             sidebar.topAnchor.constraint(equalTo: topAnchor),
             sidebar.leadingAnchor.constraint(equalTo: leadingAnchor),
             sidebar.bottomAnchor.constraint(equalTo: bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: sidebarWidth),
+            sidebar.widthAnchor.constraint(equalToConstant: LODesign.Metric.sidebarWidth),
 
             contentScrollView.topAnchor.constraint(equalTo: topAnchor),
             contentScrollView.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
@@ -430,15 +432,17 @@ class LOSettingsView: NSView {
     // MARK: - Sidebar
 
     private func makeSidebar() -> NSView {
-        let sidebar = NSView()
+        // 毛玻璃材质侧边栏，与系统设置一致
+        let sidebar = NSVisualEffectView()
+        sidebar.material = .sidebar
+        sidebar.blendingMode = .withinWindow
+        sidebar.state = .followsWindowActiveState
         sidebar.translatesAutoresizingMaskIntoConstraints = false
-        sidebar.wantsLayer = true
-        sidebar.layer?.backgroundColor = NSColor.sidebarBackgroundColor.cgColor
 
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 4
+        stack.spacing = 2
         stack.translatesAutoresizingMaskIntoConstraints = false
         sidebar.addSubview(stack)
 
@@ -447,13 +451,14 @@ class LOSettingsView: NSView {
             let button = makeTabButton(tab: tab)
             tabButtons.append(button)
             stack.addArrangedSubview(button)
-            button.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
+            button.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
 
+        let inset = LODesign.Metric.sidebarInset
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 12),
-            stack.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: inset + 8),
+            stack.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: inset),
+            stack.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -inset),
         ])
 
         return sidebar
@@ -461,7 +466,7 @@ class LOSettingsView: NSView {
 
     private func makeTabButton(tab: SettingsTab) -> NSButton {
         let button = NSButton()
-        button.setButtonType(.momentaryLight)
+        button.setButtonType(.momentaryChange)
         button.bezelStyle = .regularSquare
         button.image = NSImage(systemSymbolName: tab.iconName, accessibilityDescription: tab.title)
         button.title = tab.title
@@ -471,14 +476,12 @@ class LOSettingsView: NSView {
         button.target = self
         button.action = #selector(tabButtonClicked(_:))
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.heightAnchor.constraint(equalToConstant: 34).isActive = true
-        button.contentTintColor = NSColor.labelColor
+        button.heightAnchor.constraint(equalToConstant: LODesign.Metric.sidebarItemHeight).isActive = true
+        button.contentTintColor = LODesign.Color.textSecondary
         button.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         button.isBordered = false
         button.wantsLayer = true
-        button.layer?.cornerRadius = 6
-
-        // 让图片和文字更贴近左侧
+        button.layer?.cornerRadius = 7
         button.imageHugsTitle = true
         return button
     }
@@ -491,12 +494,14 @@ class LOSettingsView: NSView {
     private func switchTab(to tab: SettingsTab) {
         currentTab = tab
 
-        // 更新按钮选中样式
+        // 更新按钮选中样式：选中项用半透明胶囊，文字提亮
         for button in tabButtons {
             let selected = (button.tag == tab.rawValue)
             button.wantsLayer = true
-            button.layer?.backgroundColor = selected ? NSColor.selectedTabBackgroundColor.cgColor : NSColor.clear.cgColor
-            button.contentTintColor = selected ? NSColor.selectedTabTextColor : NSColor.labelColor
+            button.layer?.backgroundColor = selected
+                ? LODesign.Color.sidebarSelection.cgColor
+                : NSColor.clear.cgColor
+            button.contentTintColor = selected ? LODesign.Color.textPrimary : LODesign.Color.textSecondary
         }
 
         // 移除旧内容视图，添加新内容视图到 host view
@@ -537,117 +542,65 @@ class LOSettingsView: NSView {
     // MARK: - 翻译设置内容
 
     private func makeTranslationContent() -> NSView {
-        translationStack.addArrangedSubview(makeFeatureToggleRows())
-        translationStack.addArrangedSubview(spacer(sectionSpacing))
-        translationStack.addArrangedSubview(makeSeparator())
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
 
-        // 以下为翻译相关设置区域，开关关闭时统一隐藏
-        translationSectionViews = []
+        stack.addArrangedSubview(makePageHeader("翻译", subtitle: "翻译、悬浮窗与语音播报相互独立，可任意组合"))
+        stack.addArrangedSubview(spacer(LODesign.Metric.cardGap))
 
-        // === 翻译服务 ===
-        translationSectionViews.append(makeSectionHeader("翻译服务"))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(spacer(sectionSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeProviderRow())
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(spacer(rowSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeModelRow())
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(spacer(rowSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeCustomBaseURLRow())
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(spacer(rowSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeAPIKeyRow())
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeFallbackHintRow())
-        translationStack.addArrangedSubview(translationSectionViews.last!)
+        appendSection("功能开关", rows: [makeFeatureToggleRows()], to: stack, isFirst: true)
 
-        translationSectionViews.append(spacer(sectionSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeSeparator())
-        translationStack.addArrangedSubview(translationSectionViews.last!)
+        appendSection("翻译服务", rows: [
+            makeProviderRow(),
+            makeModelRow(),
+            makeCustomBaseURLRow(),
+            makeAPIKeyRow(),
+            makeFallbackHintRow()
+        ], to: stack)
 
-        // === 翻译语言 ===
-        translationSectionViews.append(spacer(sectionSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeSectionHeader("翻译语言"))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(spacer(sectionSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeTargetLanguageRow())
-        translationStack.addArrangedSubview(translationSectionViews.last!)
+        appendSection("翻译语言", rows: [
+            makeTargetLanguageRow()
+        ], to: stack)
 
-        translationSectionViews.append(spacer(sectionSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeSeparator())
-        translationStack.addArrangedSubview(translationSectionViews.last!)
+        appendSection("语音播报", rows: [
+            makeDescriptionLabel("使用系统语音离线朗读，无需额外配置；关闭翻译时朗读原文"),
+            makeSpeechRateRow()
+        ], to: stack)
 
-        // === 语音播报 ===
-        translationSectionViews.append(spacer(sectionSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeSectionHeader("语音播报"))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(spacer(sectionSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeDescriptionLabel("使用系统语音离线朗读，无需额外配置；翻译关闭时朗读原文"))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(spacer(rowSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeSpeechRateRow())
-        translationStack.addArrangedSubview(translationSectionViews.last!)
+        appendSection("翻译触发", rows: [
+            makeNumberRow(
+                label: "段落间隔：",
+                field: &segmentPauseField,
+                stepper: &segmentPauseStepper,
+                minValue: 0.1, maxValue: 999999,
+                step: 0.1,
+                format: "%.1f 秒",
+                unit: "秒",
+                action: #selector(segmentPauseChanged),
+                valueMultiplier: 1
+            ),
+            makeDescriptionLabel("停顿超过此时间后，下次输入将开启新段落"),
+            makeNumberRow(
+                label: "翻译间隔：",
+                field: &debounceField,
+                stepper: &debounceStepper,
+                minValue: 0.1, maxValue: 999999,
+                step: 0.1,
+                format: "%.1f 秒",
+                unit: "秒",
+                action: #selector(debounceChanged),
+                valueMultiplier: 1
+            ),
+            makeDescriptionLabel("停止输入后等待此时间再触发翻译")
+        ], to: stack)
 
-        translationSectionViews.append(spacer(sectionSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeSeparator())
-        translationStack.addArrangedSubview(translationSectionViews.last!)
+        stack.addArrangedSubview(spacer(LODesign.Metric.cardGap))
+        stack.addArrangedSubview(makeResetButtonRow())
 
-        // === 翻译触发 ===
-        translationSectionViews.append(spacer(sectionSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeSectionHeader("翻译触发"))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(spacer(sectionSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeNumberRow(
-            label: "段落间隔：",
-            field: &segmentPauseField,
-            stepper: &segmentPauseStepper,
-            minValue: 0.1, maxValue: 999999,
-            step: 0.1,
-            format: "%.1f 秒",
-            unit: "秒",
-            action: #selector(segmentPauseChanged),
-            valueMultiplier: 1
-        ))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeDescriptionLabel("停顿超过此时间后，下次输入将开启新段落"))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(spacer(rowSpacing))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeNumberRow(
-            label: "翻译间隔：",
-            field: &debounceField,
-            stepper: &debounceStepper,
-            minValue: 0.1, maxValue: 999999,
-            step: 0.1,
-            format: "%.1f 秒",
-            unit: "秒",
-            action: #selector(debounceChanged),
-            valueMultiplier: 1
-        ))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-        translationSectionViews.append(makeDescriptionLabel("停止输入后等待此时间再触发翻译"))
-        translationStack.addArrangedSubview(translationSectionViews.last!)
-
-        // === 恢复默认按钮 ===
-        translationStack.addArrangedSubview(spacer(sectionSpacing + 4))
-        translationStack.addArrangedSubview(makeResetButtonRow())
-
-        return wrapContent(translationStack)
+        return wrapContent(stack)
     }
 
     // MARK: - 悬浮窗设置内容
@@ -664,123 +617,52 @@ class LOSettingsView: NSView {
     }()
 
     private func makeOverlayContent() -> NSView {
-        // === 外观主题 ===
-        overlayStack.addArrangedSubview(makeSectionHeader("外观主题"))
-        overlayStack.addArrangedSubview(spacer(sectionSpacing))
-        overlayStack.addArrangedSubview(makeThemeRow())
-        overlayStack.addArrangedSubview(spacer(rowSpacing))
-        overlayStack.addArrangedSubview(makeColorRow(
-            label: "背景颜色：",
-            well: &backgroundColorWell,
-            action: #selector(backgroundColorChanged)
-        ))
-        overlayStack.addArrangedSubview(spacer(rowSpacing))
-        overlayStack.addArrangedSubview(makeColorRow(
-            label: "原文颜色：",
-            well: &originalTextColorWell,
-            action: #selector(originalTextColorChanged)
-        ))
-        overlayStack.addArrangedSubview(spacer(rowSpacing))
-        overlayStack.addArrangedSubview(makeColorRow(
-            label: "译文颜色：",
-            well: &translationTextColorWell,
-            action: #selector(translationTextColorChanged)
-        ))
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
 
-        overlayStack.addArrangedSubview(spacer(sectionSpacing))
-        overlayStack.addArrangedSubview(makeSeparator())
+        stack.addArrangedSubview(makePageHeader("悬浮窗", subtitle: "调整翻译浮窗的外观、行为与字号"))
+        stack.addArrangedSubview(spacer(LODesign.Metric.cardGap))
 
-        // === 窗口行为 ===
-        overlayStack.addArrangedSubview(spacer(sectionSpacing))
-        overlayStack.addArrangedSubview(makeSectionHeader("窗口行为"))
-        overlayStack.addArrangedSubview(spacer(sectionSpacing))
-        overlayStack.addArrangedSubview(makePositionModeRow())
-        overlayStack.addArrangedSubview(spacer(rowSpacing))
-        overlayStack.addArrangedSubview(makeClickThroughRow())
-        overlayStack.addArrangedSubview(spacer(rowSpacing))
-        overlayStack.addArrangedSubview(makeNumberRow(
-            label: "自动消失：",
-            field: &dismissField,
-            stepper: &dismissStepper,
-            minValue: 1, maxValue: 9999,
-            step: 0.1,
-            format: "%.1f 秒",
-            unit: "秒",
-            action: #selector(dismissChanged),
-            valueMultiplier: 1
-        ))
-        overlayStack.addArrangedSubview(spacer(rowSpacing))
-        overlayStack.addArrangedSubview(makeNumberRow(
-            label: "透明度：",
-            field: &opacityField,
-            stepper: &opacityStepper,
-            minValue: 0.1, maxValue: 1.0,
-            step: 0.01,
-            format: "%.0f%%",
-            unit: "%",
-            action: #selector(opacityChanged),
-            valueMultiplier: 100
-        ))
+        appendSection("外观", rows: [
+            makeThemeRow(),
+            makeColorRow(label: "背景颜色：", well: &backgroundColorWell,
+                         action: #selector(backgroundColorChanged)),
+            makeColorRow(label: "原文颜色：", well: &originalTextColorWell,
+                         action: #selector(originalTextColorChanged)),
+            makeColorRow(label: "译文颜色：", well: &translationTextColorWell,
+                         action: #selector(translationTextColorChanged))
+        ], to: stack, isFirst: true)
 
-        overlayStack.addArrangedSubview(spacer(sectionSpacing))
-        overlayStack.addArrangedSubview(makeSeparator())
+        appendSection("窗口行为", rows: [
+            makePositionModeRow(),
+            makeClickThroughRow(),
+            makeNumberRow(label: "自动消失：", field: &dismissField, stepper: &dismissStepper,
+                          minValue: 1, maxValue: 9999, step: 0.1, format: "%.1f 秒", unit: "秒",
+                          action: #selector(dismissChanged), valueMultiplier: 1),
+            makeNumberRow(label: "透明度：", field: &opacityField, stepper: &opacityStepper,
+                          minValue: 0.1, maxValue: 1.0, step: 0.01, format: "%.0f%%", unit: "%",
+                          action: #selector(opacityChanged), valueMultiplier: 100)
+        ], to: stack)
 
-        // === 尺寸与字体 ===
-        overlayStack.addArrangedSubview(spacer(sectionSpacing))
-        overlayStack.addArrangedSubview(makeSectionHeader("尺寸与字体"))
-        overlayStack.addArrangedSubview(spacer(sectionSpacing))
-        overlayStack.addArrangedSubview(makeNumberRow(
-            label: "最大宽度：",
-            field: &overlayMaxWidthField,
-            stepper: &overlayMaxWidthStepper,
-            minValue: 200, maxValue: 800,
-            step: 10,
-            format: "%.0f",
-            unit: "pt",
-            action: #selector(overlayMaxWidthChanged),
-            valueMultiplier: 1
-        ))
-        overlayStack.addArrangedSubview(spacer(rowSpacing))
-        overlayStack.addArrangedSubview(makeNumberRow(
-            label: "最大高度：",
-            field: &overlayMaxHeightField,
-            stepper: &overlayMaxHeightStepper,
-            minValue: 80, maxValue: 600,
-            step: 10,
-            format: "%.0f",
-            unit: "pt",
-            action: #selector(overlayMaxHeightChanged),
-            valueMultiplier: 1
-        ))
-        overlayStack.addArrangedSubview(spacer(rowSpacing))
-        overlayStack.addArrangedSubview(makeNumberRow(
-            label: "原文字号：",
-            field: &originalFontSizeField,
-            stepper: &originalFontSizeStepper,
-            minValue: 8, maxValue: 32,
-            step: 1,
-            format: "%.0f",
-            unit: "pt",
-            action: #selector(originalFontSizeChanged),
-            valueMultiplier: 1
-        ))
-        overlayStack.addArrangedSubview(spacer(rowSpacing))
-        overlayStack.addArrangedSubview(makeNumberRow(
-            label: "译文字号：",
-            field: &translationFontSizeField,
-            stepper: &translationFontSizeStepper,
-            minValue: 8, maxValue: 32,
-            step: 1,
-            format: "%.0f",
-            unit: "pt",
-            action: #selector(translationFontSizeChanged),
-            valueMultiplier: 1
-        ))
+        appendSection("尺寸与字体", rows: [
+            makeNumberRow(label: "最大宽度：", field: &overlayMaxWidthField, stepper: &overlayMaxWidthStepper,
+                          minValue: 200, maxValue: 800, step: 10, format: "%.0f", unit: "pt",
+                          action: #selector(overlayMaxWidthChanged), valueMultiplier: 1),
+            makeNumberRow(label: "最大高度：", field: &overlayMaxHeightField, stepper: &overlayMaxHeightStepper,
+                          minValue: 80, maxValue: 600, step: 10, format: "%.0f", unit: "pt",
+                          action: #selector(overlayMaxHeightChanged), valueMultiplier: 1),
+            makeNumberRow(label: "原文字号：", field: &originalFontSizeField, stepper: &originalFontSizeStepper,
+                          minValue: 8, maxValue: 32, step: 1, format: "%.0f", unit: "pt",
+                          action: #selector(originalFontSizeChanged), valueMultiplier: 1),
+            makeNumberRow(label: "译文字号：", field: &translationFontSizeField, stepper: &translationFontSizeStepper,
+                          minValue: 8, maxValue: 32, step: 1, format: "%.0f", unit: "pt",
+                          action: #selector(translationFontSizeChanged), valueMultiplier: 1)
+        ], to: stack)
 
-        overlayStack.addArrangedSubview(spacer(sectionSpacing))
-        overlayStack.addArrangedSubview(makeSeparator())
-
-        return wrapContent(overlayStack)
+        return wrapContent(stack)
     }
 
     // MARK: - 悬浮窗设置控件构建
@@ -794,24 +676,12 @@ class LOSettingsView: NSView {
         return makeRow(label: "主题：", control: overlayThemePopup)
     }
 
-    /// 构建穿透模式复选框行（带缩进，与其他设置项的控件列对齐）
+    /// 构建穿透模式复选框行
     private func makeClickThroughRow() -> NSView {
         clickThroughCheckbox = NSButton(checkboxWithTitle: "穿透模式（鼠标可穿透悬浮窗点击后方内容）",
                                          target: self, action: #selector(clickThroughChanged))
         clickThroughCheckbox.font = NSFont.systemFont(ofSize: 13)
-
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.widthAnchor.constraint(equalToConstant: labelWidth + 6).isActive = true
-
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 0
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.addArrangedSubview(spacer)
-        row.addArrangedSubview(clickThroughCheckbox)
-        return row
+        return clickThroughCheckbox
     }
 
     /// 构建标签显隐复选框行（带缩进，与其他设置项的控件列对齐）
@@ -824,29 +694,20 @@ class LOSettingsView: NSView {
         stack.spacing = 0
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        stack.addArrangedSubview(makeSectionHeader("快捷键说明"))
-        stack.addArrangedSubview(spacer(sectionSpacing))
+        stack.addArrangedSubview(makePageHeader("快捷键", subtitle: "输入法激活时可用"))
+        stack.addArrangedSubview(spacer(LODesign.Metric.cardGap))
 
-        // 快捷键列表
         let shortcuts: [(name: String, key: String, desc: String)] = [
             ("打开语境设置", "⌘ ,", "在输入法菜单中打开设置窗口"),
             ("快捷复制翻译", "⌃ ⌘ ,", "复制最近一次翻译结果到剪贴板"),
         ]
 
-        for shortcut in shortcuts {
-            stack.addArrangedSubview(makeShortcutRow(name: shortcut.name, key: shortcut.key, desc: shortcut.desc))
-            stack.addArrangedSubview(spacer(rowSpacing))
-        }
+        appendSection("快捷键说明", rows: shortcuts.map {
+            makeShortcutRow(name: $0.name, key: $0.key, desc: $0.desc)
+        }, to: stack, isFirst: true)
 
-        stack.addArrangedSubview(spacer(sectionSpacing))
-        stack.addArrangedSubview(makeSeparator())
-        stack.addArrangedSubview(spacer(sectionSpacing))
-
-        // 说明文字
-        let hint = NSTextField(labelWithString: "提示：快捷键仅在输入法激活状态下生效。")
-        hint.font = NSFont.systemFont(ofSize: 11)
-        hint.textColor = NSColor.secondaryLabelColor
-        stack.addArrangedSubview(hint)
+        stack.addArrangedSubview(spacer(LODesign.Metric.cardGap))
+        stack.addArrangedSubview(makeDescriptionLabel("提示：快捷键仅在输入法激活状态下生效。"))
 
         return wrapContent(stack)
     }
@@ -957,18 +818,85 @@ class LOSettingsView: NSView {
         }
     }
 
-    /// 将内容 stack 包裹在一个容器中，并添加边距约束
+    /// 将内容 stack 包裹在一个容器中，并添加边距约束。
+    /// 底部只用「大于等于」而不是等号：内容不足一屏时让内容贴顶排列，
+    /// 避免 NSStackView 被拉伸导致行间距异常、最后一行被滚动区裁掉。
     private func wrapContent(_ stack: NSStackView) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(stack)
+        let inset = LODesign.Metric.contentMargin
+        let bottomInset = LODesign.Metric.contentBottomInset
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: margin),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: margin),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -margin),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -margin),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: inset),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: inset),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -inset),
+            container.bottomAnchor.constraint(greaterThanOrEqualTo: stack.bottomAnchor, constant: bottomInset),
         ])
         return container
+    }
+
+    // MARK: - 卡片式布局辅助
+
+    /// 页面标题区：主标题 + 一句说明
+    private func makePageHeader(_ title: String, subtitle: String) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = NSTextField.loLabel(title, font: LODesign.Font.pageTitle, color: LODesign.Color.textPrimary)
+        let subtitleLabel = NSTextField.loLabel(subtitle, font: LODesign.Font.caption, color: LODesign.Color.textSecondary)
+        stack.addArrangedSubview(titleLabel)
+        stack.addArrangedSubview(subtitleLabel)
+        return stack
+    }
+
+    /// 圆角卡片：把若干行包成一组，形成系统设置那样的分组
+    private func makeCard(_ rows: [NSView]) -> NSView {
+        let inner = NSStackView()
+        inner.orientation = .vertical
+        inner.alignment = .leading
+        inner.spacing = LODesign.Metric.rowGap
+        inner.translatesAutoresizingMaskIntoConstraints = false
+
+        for row in rows {
+            inner.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
+        }
+
+        let card = NSView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.wantsLayer = true
+        card.layer?.backgroundColor = LODesign.Color.card.cgColor
+        card.layer?.cornerRadius = LODesign.Metric.cardCorner
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = LODesign.Color.border.cgColor
+        card.addSubview(inner)
+
+        let pad = LODesign.Metric.cardPadding
+        NSLayoutConstraint.activate([
+            inner.topAnchor.constraint(equalTo: card.topAnchor, constant: pad),
+            inner.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: pad),
+            inner.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -pad),
+            inner.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -pad),
+        ])
+        return card
+    }
+
+    /// 把「区块标题 + 卡片」组装好，直接加进页面 stack
+    private func appendSection(_ title: String, rows: [NSView], to stack: NSStackView, isFirst: Bool = false) {
+        if !isFirst {
+            stack.addArrangedSubview(spacer(LODesign.Metric.cardGap))
+        }
+        stack.addArrangedSubview(makeSectionHeader(title))
+        stack.addArrangedSubview(spacer(6))
+
+        // 卡片撑满内容宽度，各分组左右边界保持对齐
+        let card = makeCard(rows)
+        stack.addArrangedSubview(card)
+        card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
     // MARK: - UI 辅助
@@ -1019,8 +947,16 @@ class LOSettingsView: NSView {
     }
 
     private func makeSectionHeader(_ title: String) -> NSView {
-        let label = NSTextField(labelWithString: title)
-        label.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+        // 卡片分组小标题：小号、次级颜色、轻微字距
+        let attributed = NSAttributedString(
+            string: title.uppercased(),
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: LODesign.Color.textTertiary,
+                .kern: 0.5
+            ]
+        )
+        let label = NSTextField(labelWithAttributedString: attributed)
         label.translatesAutoresizingMaskIntoConstraints = false
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -1029,7 +965,7 @@ class LOSettingsView: NSView {
             label.topAnchor.constraint(equalTo: container.topAnchor),
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             label.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            container.heightAnchor.constraint(equalToConstant: 22),
+            container.heightAnchor.constraint(equalToConstant: 16),
         ])
         return container
     }
@@ -1042,26 +978,30 @@ class LOSettingsView: NSView {
     }
 
     private func makeRow(label text: String, control: NSView) -> NSView {
-        let label = NSTextField(labelWithString: text)
-        label.alignment = .right
-        label.translatesAutoresizingMaskIntoConstraints = false
+        let label = NSTextField.loLabel(text, font: LODesign.Font.row, color: LODesign.Color.textPrimary)
         label.setContentHuggingPriority(.required, for: .horizontal)
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         control.translatesAutoresizingMaskIntoConstraints = false
-        control.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        control.setContentHuggingPriority(.required, for: .horizontal)
         control.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
+
+        // 中间填充，把控件推到行尾（与系统设置的表单一致）
+        let filler = NSView()
+        filler.translatesAutoresizingMaskIntoConstraints = false
+        filler.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        filler.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 6
+        row.spacing = 8
         row.translatesAutoresizingMaskIntoConstraints = false
         row.addArrangedSubview(label)
+        row.addArrangedSubview(filler)
         row.addArrangedSubview(control)
 
         label.widthAnchor.constraint(equalToConstant: labelWidth).isActive = true
-        control.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 6).isActive = true
         return row
     }
 
@@ -1189,24 +1129,31 @@ class LOSettingsView: NSView {
         movableRadio = NSButton(radioButtonWithTitle: "可自由拖动", target: self, action: #selector(positionModeChanged))
         followCursorRadio = NSButton(radioButtonWithTitle: "跟随光标", target: self, action: #selector(positionModeChanged))
 
-        let label = NSTextField(labelWithString: "位置模式：")
-        label.alignment = .right
+        let label = NSTextField.loLabel("位置模式：", font: LODesign.Font.row, color: LODesign.Color.textPrimary)
         label.setContentHuggingPriority(.required, for: .horizontal)
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
         label.widthAnchor.constraint(equalToConstant: labelWidth).isActive = true
 
         let radios = NSStackView()
         radios.orientation = .horizontal
-        radios.spacing = 16
+        radios.spacing = 14
+        radios.translatesAutoresizingMaskIntoConstraints = false
+        radios.setContentHuggingPriority(.required, for: .horizontal)
         radios.addArrangedSubview(fixedRadio)
         radios.addArrangedSubview(movableRadio)
         radios.addArrangedSubview(followCursorRadio)
 
+        let filler = NSView()
+        filler.translatesAutoresizingMaskIntoConstraints = false
+        filler.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        filler.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 6
+        row.spacing = 8
         row.addArrangedSubview(label)
+        row.addArrangedSubview(filler)
         row.addArrangedSubview(radios)
         row.translatesAutoresizingMaskIntoConstraints = false
         return row
@@ -1214,22 +1161,11 @@ class LOSettingsView: NSView {
 
     /// 构建设置项说明文字（小号灰色字体，缩进对齐控件位置）
     private func makeDescriptionLabel(_ text: String) -> NSView {
-        let label = NSTextField(labelWithString: text)
-        label.font = NSFont.systemFont(ofSize: 11)
-        label.textColor = NSColor.secondaryLabelColor
-
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.widthAnchor.constraint(equalToConstant: labelWidth + 6).isActive = true
-
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 0
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.addArrangedSubview(spacer)
-        row.addArrangedSubview(label)
-        return row
+        let label = NSTextField.loLabel(text, font: LODesign.Font.caption, color: LODesign.Color.textSecondary)
+        label.maximumNumberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        label.cell?.wraps = true
+        return label
     }
 
     /// 构建数值调整行：label | 数值输入框 | 上下箭头(stepper) | 单位
@@ -1315,12 +1251,15 @@ class LOSettingsView: NSView {
             onChange: onChange
         )
 
-        let label = NSTextField(labelWithString: text)
-        label.alignment = .right
-        label.translatesAutoresizingMaskIntoConstraints = false
+        let label = NSTextField.loLabel(text, font: LODesign.Font.row, color: LODesign.Color.textPrimary)
         label.setContentHuggingPriority(.required, for: .horizontal)
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
         label.widthAnchor.constraint(equalToConstant: labelWidth).isActive = true
+
+        let filler = NSView()
+        filler.translatesAutoresizingMaskIntoConstraints = false
+        filler.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        filler.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let row = NSStackView()
         row.orientation = .horizontal
@@ -1328,6 +1267,7 @@ class LOSettingsView: NSView {
         row.spacing = 6
         row.translatesAutoresizingMaskIntoConstraints = false
         row.addArrangedSubview(label)
+        row.addArrangedSubview(filler)
         row.addArrangedSubview(field)
         row.addArrangedSubview(stepper)
         row.addArrangedSubview(unitLabel)
@@ -1849,34 +1789,3 @@ class LOSettingsView: NSView {
 }
 
 // MARK: - 颜色扩展
-
-private extension NSColor {
-    /// 侧边栏背景色
-    static var sidebarBackgroundColor: NSColor {
-        if #available(macOS 10.14, *) {
-            return NSColor(name: nil) { appearance in
-                return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                    ? NSColor(calibratedWhite: 0.15, alpha: 1.0)
-                    : NSColor(calibratedWhite: 0.96, alpha: 1.0)
-            }
-        }
-        return NSColor(calibratedWhite: 0.96, alpha: 1.0)
-    }
-
-    /// 选中 tab 背景色
-    static var selectedTabBackgroundColor: NSColor {
-        if #available(macOS 10.14, *) {
-            return NSColor(name: nil) { appearance in
-                return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                    ? NSColor(calibratedWhite: 0.28, alpha: 1.0)
-                    : NSColor(calibratedWhite: 0.90, alpha: 1.0)
-            }
-        }
-        return NSColor(calibratedWhite: 0.90, alpha: 1.0)
-    }
-
-    /// 选中 tab 文字颜色
-    static var selectedTabTextColor: NSColor {
-        return NSColor.labelColor
-    }
-}
