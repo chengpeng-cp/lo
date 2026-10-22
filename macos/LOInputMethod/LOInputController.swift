@@ -130,11 +130,6 @@ class LOInputController: IMKInputController {
                 guard LOSettings.load().overlayEnabled else { return }
                 LOTranslationOverlay.shared.showLoading(originalText: text)
             }
-            // 流式增量：逐步更新译文（原文已在 loading 时设置，保持不变）
-            translationScheduler.onTranslationDelta = { _, translation in
-                guard LOSettings.load().overlayEnabled else { return }
-                LOTranslationOverlay.shared.updateTranslation(translation)
-            }
             // 文本段完成：译文为 nil 表示未调用翻译（仅显示/播报原文）
             translationScheduler.onTranslationReady = { original, translation in
                 if LOSettings.load().overlayEnabled {

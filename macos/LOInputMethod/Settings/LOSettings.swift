@@ -1,11 +1,10 @@
 import AppKit
 import Foundation
-import Security
 
 // MARK: - 语境设置
 
 /// 语境输入法的设置数据模型
-/// 普通设置使用 UserDefaults 持久化，API 密钥使用 Keychain 持久化
+/// 所有设置使用 UserDefaults 持久化
 struct LOSettings {
 
     // MARK: - 设置项
@@ -15,18 +14,6 @@ struct LOSettings {
 
     /// 是否显示翻译悬浮窗（独立于翻译开关；翻译关闭时只显示原文）
     var overlayEnabled: Bool = true
-
-    /// 翻译服务提供商：bing / deepseek / glm / qwen / kimi / minimax / openai / volcengine / custom
-    var translationProvider: String = "bing"
-
-    /// 当前提供商的翻译模型（内存中的当前值，持久化按提供商分别存储）
-    var translationModel: String = ""
-
-    /// 自定义提供商的 API 端点（仅 provider == custom 时使用）
-    var customLLMBaseURL: String = ""
-
-    /// 翻译模式：fluent / native / literal
-    var translationMode: String = "fluent"
 
     /// 翻译目标语言（语言代码，如 en / ja / fr，见 TargetLanguage）
     var targetLanguage: String = "en"
@@ -137,10 +124,6 @@ struct LOSettings {
 
     private enum Keys {
         static let translationEnabled = "LO_translationEnabled"
-        static let translationProvider = "LO_translationProvider"
-        static let translationModelPrefix = "LO_translationModel_" // 按提供商分别存储：LO_translationModel_deepseek
-        static let customLLMBaseURL = "LO_customLLMBaseURL"
-        static let translationMode = "LO_translationMode"
         static let targetLanguage = "LO_targetLanguage"
         static let overlayPositionMode = "LO_overlayPositionMode"
         static let overlayFixedPositionLegacy = "LO_overlayFixedPosition"
@@ -167,11 +150,6 @@ struct LOSettings {
         static let overlayEnabled = "LO_overlayEnabled"
     }
 
-    // MARK: - Keychain 配置
-
-    /// Keychain 服务名
-    private static let keychainService = "com.lo.inputmethod"
-
     // MARK: - 加载与保存
 
     /// 从 UserDefaults 加载设置
@@ -184,11 +162,6 @@ struct LOSettings {
         if defaults.object(forKey: Keys.translationEnabled) != nil {
             settings.translationEnabled = defaults.bool(forKey: Keys.translationEnabled)
         }
-        settings.translationProvider = defaults.string(forKey: Keys.translationProvider) ?? "bing"
-        // 加载当前提供商对应的模型名
-        settings.translationModel = defaults.string(forKey: Keys.translationModelPrefix + settings.translationProvider) ?? ""
-        settings.customLLMBaseURL = defaults.string(forKey: Keys.customLLMBaseURL) ?? ""
-        settings.translationMode = defaults.string(forKey: Keys.translationMode) ?? "fluent"
         settings.targetLanguage = defaults.string(forKey: Keys.targetLanguage) ?? "en"
         debugLog("[Settings] 加载设置: targetLanguage=\(settings.targetLanguage)")
         // 位置模式：优先读新键，不存在则从旧键迁移
@@ -247,11 +220,6 @@ struct LOSettings {
         let defaults = UserDefaults.standard
 
         defaults.set(translationEnabled, forKey: Keys.translationEnabled)
-        defaults.set(translationProvider, forKey: Keys.translationProvider)
-        // 按提供商分别存储模型名
-        defaults.set(translationModel, forKey: Keys.translationModelPrefix + translationProvider)
-        defaults.set(customLLMBaseURL, forKey: Keys.customLLMBaseURL)
-        defaults.set(translationMode, forKey: Keys.translationMode)
         defaults.set(targetLanguage, forKey: Keys.targetLanguage)
         defaults.set(overlayPositionMode, forKey: Keys.overlayPositionMode)
         defaults.set(Double(overlayPosition.x), forKey: Keys.overlayPositionX)
@@ -278,78 +246,5 @@ struct LOSettings {
         
         // 强制同步，确保设置立即写入磁盘
         defaults.synchronize()
-    }
-
-    /// 加载指定提供商保存的模型名（切换提供商时调用）
-    /// - Parameter provider: 提供商 rawValue
-    /// - Returns: 该提供商上次保存的模型名，无则返回空字符串
-    static func loadModel(forProvider provider: String) -> String {
-        return UserDefaults.standard.string(forKey: Keys.translationModelPrefix + provider) ?? ""
-    }
-
-    // MARK: - Keychain API 密钥管理
-
-    /// 获取指定提供商的 API 密钥
-    /// - Parameter provider: 提供商名称（deepseek / glm / qwen / kimi / minimax / openai / volcengine / custom）
-    /// - Returns: API 密钥，如果不存在则返回 nil
-    func getAPIKey(provider: String) -> String? {
-        let key = "apikey_\(provider)"
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: LOSettings.keychainService,
-            kSecAttrAccount as String: key,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess else { return nil }
-
-        guard let data = result as? Data,
-              let apiKey = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-
-        return apiKey
-    }
-
-    /// 设置指定提供商的 API 密钥
-    /// - Parameters:
-    ///   - provider: 提供商名称（deepseek / glm / qwen / kimi / minimax / openai / volcengine / custom）
-    ///   - key: API 密钥
-    func setAPIKey(provider: String, key: String) {
-        let account = "apikey_\(provider)"
-        guard let keyData = key.data(using: .utf8) else { return }
-
-        // 先尝试删除已有的密钥
-        let deleteQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: LOSettings.keychainService,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
-
-        // 添加新密钥
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: LOSettings.keychainService,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: keyData
-        ]
-        SecItemAdd(addQuery as CFDictionary, nil)
-    }
-
-    /// 删除指定提供商的 API 密钥（用户清空输入框时调用，确保旧密钥被移除）
-    /// - Parameter provider: 提供商名称
-    func deleteAPIKey(provider: String) {
-        let account = "apikey_\(provider)"
-        let deleteQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: LOSettings.keychainService,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
     }
 }

@@ -3,7 +3,7 @@ import Foundation
 // MARK: - 翻译网络会话
 
 /// 翻译专用的共享 URLSession，复用连接池以减少重复 TCP/TLS 握手开销
-/// 所有翻译器（LLM、Bing）统一使用此 session，后续请求可复用已建立的连接
+/// 所有翻译请求统一使用此 session，后续请求可复用已建立的连接
 enum TranslationNetwork {
 
     /// 共享 URLSession（复用连接池）
@@ -19,7 +19,7 @@ enum TranslationNetwork {
         return URLSession(configuration: config, delegate: TranslationRedirectDelegate(), delegateQueue: nil)
     }()
 
-    /// 云端必须使用 HTTPS；允许本机 HTTP 以连接本地模型服务。
+    /// 云端必须使用 HTTPS；允许本机回环地址的 HTTP，便于本地调试。
     static func isAllowedEndpoint(_ url: URL) -> Bool {
         guard url.user == nil, url.password == nil, url.fragment == nil,
               let host = url.host?.lowercased(), !host.isEmpty else { return false }

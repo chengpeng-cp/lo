@@ -24,14 +24,11 @@
 ## ✨ 功能特点
 
 - **边写边翻译** —— 打字时悬浮窗实时显示翻译结果，无需切换应用或复制粘贴
-- **免费翻译开箱即用** —— 默认接入微软 Edge 翻译接口（Bing），无需 API Key、零配置即用
-- **多模型大模型支持** —— 兼容 DeepSeek、GLM（智谱）、Qwen（通义千问）、Kimi（月之暗面）、MiniMax、OpenAI、火山引擎（豆包），以及任何 OpenAI 兼容的自定义端点
-- **流式输出** —— 大模型翻译采用 SSE 流式返回，首字延迟低、逐字显示
-- **三种翻译模式** —— 自然翻译 / 母语级表达 / 直译，按需选择
+- **免费翻译开箱即用** —— 接入微软 Edge 翻译接口（Bing），无需 API Key、零配置即用
 - **23 种目标语言** —— 英、日、韩、法、德、西、俄、阿、泰、越等主流语言全覆盖
 - **拼音输入引擎** —— 基于 [Rime（中州韻）](https://github.com/rime/librime) 引擎，支持朙月拼音、全拼、繁体等方案
 - **高度可定制悬浮窗** —— 位置（固定/拖动/跟随光标）、大小、透明度、深/浅色主题、字号、颜色全部可调
-- **API Key 安全存储** —— macOS 使用 Keychain，密钥不落盘明文
+- **可选语音播报** —— 使用系统语音离线朗读译文，也可在关闭翻译时朗读原文
 - **原生实现** —— macOS 使用 Swift + SwiftPM（IMKit），体验对齐系统原生输入法；Windows 版本调试中，暂不发布
 
 ## 📥 下载安装
@@ -61,7 +58,7 @@
 
 ## 🧹 卸载与彻底清理
 
-只删除 `.app` / 安装目录是不够的：输入法还会留下输入源注册、LaunchServices 记录、Rime 部署缓存、Keychain 中的 API Key 等。这些残留会让重装后的输入法列表出现重复项，或让新版本继续使用旧词库缓存。macOS 端提供了专门的卸载工具。
+只删除 `.app` / 安装目录是不够的：输入法还会留下输入源注册、LaunchServices 记录、Rime 部署缓存，旧版本可能还有 Keychain 中的翻译密钥。这些残留会让重装后的输入法列表出现重复项，或让新版本继续使用旧词库缓存。macOS 端提供了专门的卸载工具。
 
 ### macOS
 
@@ -72,7 +69,7 @@
 | 应用与副本 | `/Library/Input Methods/LOInputMethod.app`、`~/Library/Input Methods/`、安装器临时目录、废纸篓中的旧副本 |
 | 系统注册 | LaunchServices 记录、`AppleEnabledInputSources` / `AppleEnabledThirdPartyInputSources` 中的输入源条目、辅助功能与输入监听授权（TCC） |
 | 偏好设置 | `~/Library/Preferences/com.lo.inputmethod*.plist`（含 ByHost） |
-| 钥匙串 | 服务名为 `com.lo.inputmethod` 的翻译 API Key |
+| 钥匙串 | 服务名为 `com.lo.inputmethod` 的旧版本翻译密钥 |
 | 用户数据 | `~/Library/Application Support/LOInputMethod`、`~/Library/Rime`（词库、用户词典、部署缓存、日志） |
 | 日志与缓存 | `~/Library/Logs/LOInputMethod`、崩溃报告、Caches、Saved Application State |
 
@@ -83,7 +80,7 @@
 ```bash
 cd macos
 bash scripts/uninstall.sh --dry-run     # 只扫描，不改动任何文件
-bash scripts/uninstall.sh --purge       # 彻底清理（含词库、设置、API Key）
+bash scripts/uninstall.sh --purge       # 彻底清理（含词库、设置、旧版本密钥）
 make uninstall-clean                    # 等价的 Makefile 入口
 make package                            # 打安装镜像（自动内置卸载工具）
 bash scripts/package-uninstaller.sh     # 仅开发用：单独打一个卸载工具 DMG
@@ -123,15 +120,15 @@ windows\scripts\package.bat                   :: 同时生成安装包与卸载�
 
 ## 🔧 使用说明
 
-安装后输入法默认启用"语境翻译（免费）"模式，可直接使用。如需使用大模型翻译：
+安装后即可直接使用，翻译由免费的语境翻译（微软 Edge 翻译接口）提供，无需 API Key：
 
 1. 点击输入法菜单栏图标 → **设置**
-2. 在「翻译提供商」下拉中选择你想使用的大模型（如 DeepSeek）
-3. 填入对应的 API Key，选择目标模型（如 `deepseek-chat`）
-4. 选择目标语言（默认 English）和翻译模式
-5. 关闭设置页，开始打字即可看到悬浮窗实时翻译
+2. 在「翻译」页选择目标语言（默认 English）
+3. 关闭设置页，开始打字即可看到悬浮窗实时翻译
 
-API Key 保存在本机安全存储中，仅随请求发送给你选择的 API 服务。启用翻译后，待翻译文本会发送给所选服务；翻译缓存会保存在本机。
+翻译开关、悬浮窗、语音播报三者相互独立，可任意组合：关闭翻译时悬浮窗与播报只使用原文。
+
+待翻译文本会直接发送给微软翻译接口，不经过任何中间服务器；翻译缓存保存在本机。
 
 ## 🏗️ 从源码构建
 
@@ -141,7 +138,7 @@ API Key 保存在本机安全存储中，仅随请求发送给你选择的 API �
 |------|------|----------|
 | macOS | Swift 5.9+、Swift Package Manager、AppKit / IMKit | librime（Homebrew） |
 
-项目没有 Web 前端、后端 API 服务或数据库。翻译功能由桌面客户端直接连接用户选择的翻译服务；大模型翻译需要用户在应用设置中填写自己的 API Key。
+项目没有 Web 前端、后端 API 服务或数据库。翻译功能由桌面客户端直接连接微软翻译接口。
 
 ### 快速体验
 
@@ -215,13 +212,12 @@ lo/
 
 推送 `v*` tag（如 `v1.0.4`）时，CI 会自动创建 GitHub Release 并上传安装包。手动触发也支持：在 Actions 页面点击 "Run workflow" 即可。
 
-## 🔒 隐私与密钥存储
+## 🔒 隐私
 
-- 翻译请求**直连**所选的翻译服务（Bing / DeepSeek / OpenAI 等），不经过任何中间服务器
-- API Key 存储在本机安全存储中（macOS Keychain）
-- 默认 Bing 翻译使用微软 Edge 浏览器同款公开接口，无需注册、无账户关联
+- 翻译请求**直连**微软 Edge 翻译接口，不经过任何中间服务器
+- 无需注册、无需 API Key、无账户关联
 - 不收集任何使用数据、不联网上报、不嵌入第三方统计 SDK
-- 输入法作为本地进程运行，所有输入内容仅在本地处理和直接发送到用户所选翻译 API
+- 输入法作为本地进程运行，所有输入内容仅在本地处理并直接发送到翻译接口
 
 ## 🤝 参与贡献
 

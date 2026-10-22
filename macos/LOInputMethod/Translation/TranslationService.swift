@@ -1,26 +1,5 @@
 import Foundation
 
-// MARK: - 翻译模式
-
-/// 翻译模式，控制翻译的风格
-enum TranslationMode: String, CaseIterable {
-    /// 自然翻译：流畅自然的翻译
-    case fluent
-    /// 母语级表达：以英语母语者的方式表达
-    case native
-    /// 直译：逐字逐句翻译
-    case literal
-
-    /// 模式的中文显示名
-    var displayName: String {
-        switch self {
-        case .fluent: return "自然翻译"
-        case .native: return "母语级表达"
-        case .literal: return "直译"
-        }
-    }
-}
-
 // MARK: - 目标语言
 
 /// 翻译目标语言，rawValue 为 Bing/标准 BCP 47 语言代码
@@ -77,78 +56,24 @@ enum TargetLanguage: String, CaseIterable {
         case .ukrainian:          return "Українська（乌克兰语）"
         }
     }
-
-    /// 语言的英文名称，用于 LLM 提示词
-    var englishName: String {
-        switch self {
-        case .english:            return "English"
-        case .englishUK:          return "British English"
-        case .chineseSimplified:  return "Simplified Chinese"
-        case .chineseTraditional: return "Traditional Chinese"
-        case .japanese:           return "Japanese"
-        case .korean:             return "Korean"
-        case .french:             return "French"
-        case .german:             return "German"
-        case .spanish:            return "Spanish"
-        case .italian:            return "Italian"
-        case .portuguese:         return "Portuguese"
-        case .portugueseBR:       return "Brazilian Portuguese"
-        case .russian:            return "Russian"
-        case .arabic:             return "Arabic"
-        case .hindi:              return "Hindi"
-        case .thai:               return "Thai"
-        case .vietnamese:         return "Vietnamese"
-        case .indonesian:         return "Indonesian"
-        case .dutch:              return "Dutch"
-        case .polish:             return "Polish"
-        case .turkish:            return "Turkish"
-        case .swedish:            return "Swedish"
-        case .ukrainian:          return "Ukrainian"
-        }
-    }
 }
 
 // MARK: - 翻译服务协议
 
 /// 翻译服务协议，定义翻译接口
 protocol TranslationServiceProtocol {
-    /// 翻译文本（非流式，等全部生成后一次性返回）
+    /// 翻译文本
     /// - Parameters:
     ///   - text: 待翻译的文本
-    ///   - mode: 翻译模式
     ///   - targetLanguage: 目标语言
     /// - Returns: 翻译结果
-    func translate(text: String, mode: TranslationMode, targetLanguage: TargetLanguage) async throws -> String
-
-    /// 流式翻译：每收到一段增量文本回调 onDelta（增量片段，非全量）
-    /// - Parameters:
-    ///   - text: 待翻译的文本
-    ///   - mode: 翻译模式
-    ///   - targetLanguage: 目标语言
-    ///   - onDelta: 增量回调，参数为本次新增的文本片段
-    /// - Returns: 完整翻译结果
-    func translateStream(text: String, mode: TranslationMode, targetLanguage: TargetLanguage, onDelta: @escaping (String) -> Void) async throws -> String
-}
-
-// MARK: - 流式默认实现
-
-extension TranslationServiceProtocol {
-
-    /// 默认流式实现：不支持流式的引擎（如 Bing）回退到一次性翻译，
-    /// 将完整结果作为单个增量回调，调用方无需区分引擎类型
-    func translateStream(text: String, mode: TranslationMode, targetLanguage: TargetLanguage, onDelta: @escaping (String) -> Void) async throws -> String {
-        let result = try await translate(text: text, mode: mode, targetLanguage: targetLanguage)
-        onDelta(result)
-        return result
-    }
+    func translate(text: String, targetLanguage: TargetLanguage) async throws -> String
 }
 
 // MARK: - 翻译错误
 
 /// 翻译相关错误
 enum TranslationError: LocalizedError {
-    /// API 密钥未配置
-    case apiKeyNotConfigured
     /// 网络请求失败
     case networkError(Error)
     /// 响应解析失败
@@ -158,7 +83,6 @@ enum TranslationError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .apiKeyNotConfigured: return "API 密钥未配置，请在设置中填写"
         case .networkError(let error): return "网络请求失败：\(error.localizedDescription)"
         case .invalidResponse: return "翻译响应解析失败"
         case .apiError(let message): return "翻译服务错误：\(message)"

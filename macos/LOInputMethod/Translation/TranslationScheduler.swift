@@ -12,7 +12,7 @@ class TranslationScheduler {
     nonisolated static let shared = TranslationScheduler()
 
     /// 翻译服务实例（延迟初始化，确保在主线程上创建）
-    private lazy var translator: TranslationServiceProtocol = Self.createTranslator(for: LOSettings.load())
+    private lazy var translator: TranslationServiceProtocol = BingTranslator()
 
     /// 翻译缓存
     private let cache = TranslationCache.shared
@@ -75,10 +75,6 @@ class TranslationScheduler {
     /// 译文为 nil 表示当前不需要调用翻译服务（翻译关闭，或译文无人消费），
     /// 悬浮窗只显示原文、播报直接读原文。
     var onTranslationReady: ((String, String?) -> Void)?
-
-    /// 流式翻译增量（原文, 累积译文）：大模型边生成边更新悬浮窗，降低首字延迟
-    /// 仅在启用流式翻译且引擎支持时触发；免费引擎一次性回调全量
-    var onTranslationDelta: ((String, String) -> Void)?
 
     /// 翻译失败（原文, 错误信息）
     var onTranslationFailed: ((String, String) -> Void)?
@@ -174,64 +170,12 @@ class TranslationScheduler {
         segmentTimeoutTimer = nil
     }
 
-    /// 更新翻译服务（切换翻译提供商或模型时调用）
+    /// 更新翻译服务（设置变更后调用，重建翻译器并预热连接）
     func updateTranslator() {
         invalidateTranslation()
-        let settings = LOSettings.load()
-        translator = Self.createTranslator(for: settings)
-        // 预热连接：提前与当前翻译端点建立 TCP+TLS，后续请求可复用，减少首次翻译握手延迟
-        Self.warmupConnection(for: settings)
-    }
-
-    /// 预热翻译端点连接
-    /// 判断实际会使用的引擎：LLM 配置完整则预热 LLM 端点，否则预热 Bing 兜底端点
-    private static func warmupConnection(for settings: LOSettings) {
-        let provider = TranslationProvider.from(settings.translationProvider)
-        let hasAPIKey = !(settings.getAPIKey(provider: provider.rawValue) ?? "").isEmpty
-        let useLLM = !provider.isFree && hasAPIKey && !settings.translationModel.isEmpty
-
-        let url: URL?
-        if useLLM {
-            if provider == .custom {
-                url = URL(string: settings.customLLMBaseURL)
-            } else {
-                url = URL(string: provider.baseURL)
-            }
-        } else {
-            // 免费引擎（Bing）预热微软翻译端点
-            url = URL(string: "https://edge.microsoft.com/translate/translatetext")
-        }
-        guard let url = url else { return }
-        TranslationNetwork.warmup(url: url)
-    }
-
-    // MARK: - 翻译器工厂
-
-    /// 根据设置创建翻译器
-    /// - LLM 提供商未配置 API Key 时，自动回退到必应免费翻译
-    private static func createTranslator(for settings: LOSettings) -> TranslationServiceProtocol {
-        let provider = TranslationProvider.from(settings.translationProvider)
-
-        // 免费翻译引擎
-        if provider == .bing {
-            return BingTranslator()
-        }
-
-        // 大模型翻译：检查 API Key
-        let apiKey = settings.getAPIKey(provider: provider.rawValue) ?? ""
-        if apiKey.isEmpty {
-            debugLog("[Scheduler] \(provider.rawValue) 未配置 API Key，回退到语境免费翻译")
-            return BingTranslator()
-        }
-
-        // 检查模型名是否已配置
-        let model = settings.translationModel
-        if model.isEmpty {
-            debugLog("[Scheduler] \(provider.rawValue) 未配置模型名，回退到必应免费翻译")
-            return BingTranslator()
-        }
-
-        return LLMTranslator(provider: provider, model: model)
+        translator = BingTranslator()
+        // 预热连接：提前与翻译端点建立 TCP+TLS，后续请求可复用，减少首次翻译握手延迟
+        TranslationNetwork.warmup(url: URL(string: "https://edge.microsoft.com/translate/translatetext")!)
     }
 
     // MARK: - 文本过滤
@@ -330,11 +274,11 @@ class TranslationScheduler {
         let translator = self.translator
         let snapshot = settings
 
-        // 获取当前翻译模式与目标语言
-        let mode = TranslationMode(rawValue: snapshot.translationMode) ?? .fluent
+        // 获取当前目标语言
         let targetLang = TargetLanguage(rawValue: snapshot.targetLanguage) ?? .english
 
-        let cacheContext = [snapshot.translationProvider, snapshot.translationModel, snapshot.customLLMBaseURL, mode.rawValue, translator is BingTranslator ? "free" : "llm"].joined(separator: "\u{1F}")
+        // 缓存以目标语言区分；当前只有免费的语境翻译一种引擎
+        let cacheContext = "free"
 
         // 检查缓存
         if let cached = cache.get(text: text, targetLanguage: targetLang.rawValue, context: cacheContext) {
@@ -346,33 +290,11 @@ class TranslationScheduler {
         // 通知翻译开始
         onTranslationStart?(text)
 
-        // 大模型翻译默认走流式（边生成边显示），语境等传统机器翻译一次性返回
-        let provider = TranslationProvider.from(snapshot.translationProvider)
-        let useStream = !provider.isFree
-
         // 异步执行翻译
         let task = Task { [weak self] in
             guard let self = self else { return }
             do {
-                let result: String
-                if useStream {
-                    // 流式：每个增量片段累积后回调 UI 实时更新悬浮窗
-                    var accumulated = ""
-                    result = try await translator.translateStream(
-                        text: text,
-                        mode: mode,
-                        targetLanguage: targetLang
-                    ) { [weak self] delta in
-                        accumulated += delta
-                        let snapshot = accumulated
-                        DispatchQueue.main.async {
-                            guard let self = self, self.requestGeneration == generation else { return }
-                            self.onTranslationDelta?(text, snapshot)
-                        }
-                    }
-                } else {
-                    result = try await translator.translate(text: text, mode: mode, targetLanguage: targetLang)
-                }
+                let result = try await translator.translate(text: text, targetLanguage: targetLang)
 
                 // 任务被取消时不再回调（用户已输入新内容，旧结果无意义）
                 guard !Task.isCancelled, self.requestGeneration == generation else { return }
@@ -380,7 +302,6 @@ class TranslationScheduler {
                     throw TranslationError.invalidResponse
                 }
                 debugLog("[Scheduler] 翻译完成，长度=\(result.count)")
-                // 阻止已入主队列的旧增量在最终状态之后继续刷新界面。
                 self.requestGeneration &+= 1
                 // 缓存结果
                 self.cache.set(text: text, translation: result, targetLanguage: targetLang.rawValue, context: cacheContext)

@@ -10,7 +10,7 @@ class BingTranslator: TranslationServiceProtocol {
         self.session = session
     }
 
-    func translate(text: String, mode: TranslationMode, targetLanguage: TargetLanguage) async throws -> String {
+    func translate(text: String, targetLanguage: TargetLanguage) async throws -> String {
         try Task.checkCancellation()
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
         components.queryItems = [
