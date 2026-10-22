@@ -22,6 +22,20 @@ class TranslationScheduler {
         return LOSettings.load()
     }
 
+    /// 是否有任何消费者需要文本（翻译 / 悬浮窗 / 播报）。
+    /// 三者全关时调度器完全停止，不累积段落、不启动计时器。
+    private var isActive: Bool {
+        let s = settings
+        return s.translationEnabled || s.overlayEnabled || s.speechEnabled
+    }
+
+    /// 是否需要调用翻译服务：翻译开启，且至少有一个消费者使用译文。
+    /// 翻译开着但悬浮窗和播报都关时，译文无人使用，不发起请求（省费用和流量）。
+    private var needsTranslation: Bool {
+        let s = settings
+        return s.translationEnabled && (s.overlayEnabled || s.speechEnabled)
+    }
+
     // MARK: - 段落与计时器
 
     /// 短防抖定时器：连续快速提交时，只翻译最后一次
@@ -57,8 +71,10 @@ class TranslationScheduler {
     /// 翻译开始（用于显示加载状态）
     var onTranslationStart: ((String) -> Void)?
 
-    /// 翻译完成（原文, 译文）
-    var onTranslationReady: ((String, String) -> Void)?
+    /// 文本段处理完成（原文, 译文）。
+    /// 译文为 nil 表示当前不需要调用翻译服务（翻译关闭，或译文无人消费），
+    /// 悬浮窗只显示原文、播报直接读原文。
+    var onTranslationReady: ((String, String?) -> Void)?
 
     /// 流式翻译增量（原文, 累积译文）：大模型边生成边更新悬浮窗，降低首字延迟
     /// 仅在启用流式翻译且引擎支持时触发；免费引擎一次性回调全量
@@ -81,8 +97,8 @@ class TranslationScheduler {
     /// 但这段时间用户并未真的停顿，不应触发段落断句，否则前面已 commit 的数字/字母会被丢弃。
     /// - Parameter text: 当前组合输入的预编辑文本（可为空，仅表示有按键活动）
     func noteTyping(preedit: String = "") {
-        // 翻译功能关闭时，不执行任何翻译逻辑
-        guard settings.translationEnabled else { return }
+        // 翻译、悬浮窗、播报全部关闭时不产生任何开销
+        guard isActive else { return }
 
         invalidateTranslation()
         lock.lock()
@@ -101,8 +117,8 @@ class TranslationScheduler {
     /// 会先判断是否需要开启新段落，然后启动防抖计时
     /// - Parameter text: 用户提交的文本
     func commit(text: String) {
-        // 翻译功能关闭时，不执行任何翻译逻辑
-        guard settings.translationEnabled else { return }
+        // 翻译、悬浮窗、播报全部关闭时不产生任何开销
+        guard isActive else { return }
 
         invalidateTranslation()
         lock.lock()
@@ -300,6 +316,13 @@ class TranslationScheduler {
         debounceTimer = nil
 
         guard !text.isEmpty else { return }
+
+        // 翻译关闭，或译文无人消费（悬浮窗和播报都关）：直接交付原文，不发请求
+        if !needsTranslation {
+            debugLog("[Scheduler] 跳过翻译，仅交付原文，长度=\(text.count)")
+            onTranslationReady?(text, nil)
+            return
+        }
 
         debugLog("[Scheduler] 触发翻译，长度=\(text.count)")
         invalidateTranslation()

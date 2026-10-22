@@ -77,12 +77,6 @@ struct OverlayConfig {
 
     /// 翻译字体大小
     var translationFontSize: CGFloat = 14
-
-    /// 是否显示"原文"标签
-    var showOriginalLabel: Bool = true
-
-    /// 是否显示"翻译"标签
-    var showTranslationLabel: Bool = true
 }
 
 // MARK: - 翻译浮窗
@@ -184,6 +178,16 @@ class LOTranslationOverlay {
         cancelDismissTimer()
         lastTranslation = translation
         overlayView.update(original: originalText, translation: translation)
+        resizeAndShow()
+        scheduleDismissTimer()
+    }
+
+    /// 仅显示原文（翻译关闭时使用，译文区留空）
+    /// - Parameter originalText: 原文
+    func showOriginalOnly(originalText: String) {
+        cancelDismissTimer()
+        lastTranslation = ""
+        overlayView.showOriginalMode(originalText)
         resizeAndShow()
         scheduleDismissTimer()
     }

@@ -117,27 +117,43 @@ class LOInputController: IMKInputController {
             self?.handlePageChange(backward: backward)
         }
 
-        // 配置翻译调度器回调：连接 TranslationScheduler ↔ LOTranslationOverlay
-        // TranslationScheduler 是 @MainActor，需在 MainActor 上下文中设置回调
+        // 配置翻译调度器回调：连接 TranslationScheduler ↔ 悬浮窗 / 语音播报
+        // 三者相互独立：悬浮窗由 overlayEnabled 控制，播报由 speechEnabled 控制
         MainActor.assumeIsolated {
             // 防抖期间：静默更新悬浮窗上行原文（不闪烁）
             translationScheduler.onOriginalUpdate = { text in
+                guard LOSettings.load().overlayEnabled else { return }
                 LOTranslationOverlay.shared.silentUpdateOriginal(text)
             }
             // 翻译开始：显示 loading
             translationScheduler.onTranslationStart = { text in
+                guard LOSettings.load().overlayEnabled else { return }
                 LOTranslationOverlay.shared.showLoading(originalText: text)
             }
             // 流式增量：逐步更新译文（原文已在 loading 时设置，保持不变）
             translationScheduler.onTranslationDelta = { _, translation in
+                guard LOSettings.load().overlayEnabled else { return }
                 LOTranslationOverlay.shared.updateTranslation(translation)
             }
-            // 翻译完成：更新译文
+            // 文本段完成：译文为 nil 表示未调用翻译（仅显示/播报原文）
             translationScheduler.onTranslationReady = { original, translation in
-                LOTranslationOverlay.shared.show(originalText: original, translation: translation)
+                if LOSettings.load().overlayEnabled {
+                    if let translation = translation {
+                        LOTranslationOverlay.shared.show(originalText: original, translation: translation)
+                    } else {
+                        LOTranslationOverlay.shared.showOriginalOnly(originalText: original)
+                    }
+                }
+                // 播报只在文本段完成时触发一次；流式增量不播，避免重复朗读
+                if let translation = translation {
+                    SpeechPlayer.shared.speakTranslation(translation)
+                } else {
+                    SpeechPlayer.shared.speakTranslation(original)
+                }
             }
             // 翻译失败：显示错误，避免悬浮窗卡在 loading 状态
             translationScheduler.onTranslationFailed = { original, error in
+                guard LOSettings.load().overlayEnabled else { return }
                 LOTranslationOverlay.shared.showError(originalText: original, error: error)
             }
         }
@@ -164,6 +180,10 @@ class LOInputController: IMKInputController {
         let s = LOSettings.load()
         userSettings = s
         LOTranslationOverlay.shared.config = s.overlayConfig
+        // 关闭播报时立即停止正在朗读的内容（activateServer 与设置通知都在主线程）
+        MainActor.assumeIsolated {
+            SpeechPlayer.shared.reloadSettings()
+        }
     }
 
     // MARK: - 激活控制器与预编辑提交

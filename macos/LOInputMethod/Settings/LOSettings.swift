@@ -10,8 +10,11 @@ struct LOSettings {
 
     // MARK: - 设置项
 
-    /// 是否启用翻译功能（关闭后仅作为普通输入法使用，不翻译、不显示悬浮窗）
+    /// 是否调用翻译服务（关闭后不发任何翻译请求，悬浮窗/播报只使用原文）
     var translationEnabled: Bool = true
+
+    /// 是否显示翻译悬浮窗（独立于翻译开关；翻译关闭时只显示原文）
+    var overlayEnabled: Bool = true
 
     /// 翻译服务提供商：bing / deepseek / glm / qwen / kimi / minimax / openai / volcengine / custom
     var translationProvider: String = "bing"
@@ -45,9 +48,7 @@ struct LOSettings {
             maxWidth: CGFloat(overlayMaxWidth),
             maxHeight: CGFloat(overlayMaxHeight),
             originalFontSize: CGFloat(overlayOriginalFontSize),
-            translationFontSize: CGFloat(overlayTranslationFontSize),
-            showOriginalLabel: overlayShowOriginalLabel,
-            showTranslationLabel: overlayShowTranslationLabel
+            translationFontSize: CGFloat(overlayTranslationFontSize)
         )
     }
 
@@ -108,12 +109,6 @@ struct LOSettings {
     /// 翻译字体大小
     var overlayTranslationFontSize: Double = 14
 
-    /// 是否显示"原文"标签
-    var overlayShowOriginalLabel: Bool = true
-
-    /// 是否显示"翻译"标签
-    var overlayShowTranslationLabel: Bool = true
-
     /// 新段落间隔时间（秒）：超过该时间无新输入，下次提交将开启新段落
     var segmentPauseThreshold: Double = 5.0
 
@@ -131,6 +126,12 @@ struct LOSettings {
 
     /// Shift 长按阈值（秒），超过则触发 CapsLock 大写
     var shiftLongPressThreshold: Double = 0.4
+
+    /// 是否语音播报翻译结果（使用系统语音合成，离线免费）
+    var speechEnabled: Bool = false
+
+    /// 语音播报语速（AVSpeechUtterance 的 rate，0.5 为系统默认）
+    var speechRate: Double = 0.5
 
     // MARK: - UserDefaults 键名
 
@@ -156,13 +157,14 @@ struct LOSettings {
         static let overlayMaxHeight = "LO_overlayMaxHeight"
         static let overlayOriginalFontSize = "LO_overlayOriginalFontSize"
         static let overlayTranslationFontSize = "LO_overlayTranslationFontSize"
-        static let overlayShowOriginalLabel = "LO_overlayShowOriginalLabel"
-        static let overlayShowTranslationLabel = "LO_overlayShowTranslationLabel"
         static let segmentPauseThreshold = "LO_segmentPauseThreshold"
         static let translationDebounceInterval = "LO_translationDebounceInterval"
         static let defaultInputMode = "LO_defaultInputMode"
         static let shiftBehavior = "LO_shiftBehavior"
         static let shiftLongPressThreshold = "LO_shiftLongPressThreshold"
+        static let speechEnabled = "LO_speechEnabled"
+        static let speechRate = "LO_speechRate"
+        static let overlayEnabled = "LO_overlayEnabled"
     }
 
     // MARK: - Keychain 配置
@@ -216,12 +218,6 @@ struct LOSettings {
         if settings.overlayOriginalFontSize == 0 { settings.overlayOriginalFontSize = 14 }
         settings.overlayTranslationFontSize = defaults.double(forKey: Keys.overlayTranslationFontSize)
         if settings.overlayTranslationFontSize == 0 { settings.overlayTranslationFontSize = 14 }
-        settings.overlayShowOriginalLabel = defaults.object(forKey: Keys.overlayShowOriginalLabel) != nil
-            ? defaults.bool(forKey: Keys.overlayShowOriginalLabel)
-            : true
-        settings.overlayShowTranslationLabel = defaults.object(forKey: Keys.overlayShowTranslationLabel) != nil
-            ? defaults.bool(forKey: Keys.overlayShowTranslationLabel)
-            : true
         settings.segmentPauseThreshold = defaults.double(forKey: Keys.segmentPauseThreshold)
         if settings.segmentPauseThreshold == 0 { settings.segmentPauseThreshold = 5.0 }
         settings.translationDebounceInterval = defaults.double(forKey: Keys.translationDebounceInterval)
@@ -231,6 +227,17 @@ struct LOSettings {
         settings.shiftBehavior = defaults.string(forKey: Keys.shiftBehavior) ?? "toggle_ascii"
         settings.shiftLongPressThreshold = defaults.double(forKey: Keys.shiftLongPressThreshold)
         if settings.shiftLongPressThreshold == 0 { settings.shiftLongPressThreshold = 0.4 }
+
+        // 语音播报默认关闭，需用户主动开启
+        if defaults.object(forKey: Keys.speechEnabled) != nil {
+            settings.speechEnabled = defaults.bool(forKey: Keys.speechEnabled)
+        }
+        settings.speechRate = defaults.double(forKey: Keys.speechRate)
+        if settings.speechRate == 0 { settings.speechRate = 0.5 }
+        // 悬浮窗默认开启，与翻译解耦
+        if defaults.object(forKey: Keys.overlayEnabled) != nil {
+            settings.overlayEnabled = defaults.bool(forKey: Keys.overlayEnabled)
+        }
 
         return settings
     }
@@ -260,13 +267,14 @@ struct LOSettings {
         defaults.set(overlayMaxHeight, forKey: Keys.overlayMaxHeight)
         defaults.set(overlayOriginalFontSize, forKey: Keys.overlayOriginalFontSize)
         defaults.set(overlayTranslationFontSize, forKey: Keys.overlayTranslationFontSize)
-        defaults.set(overlayShowOriginalLabel, forKey: Keys.overlayShowOriginalLabel)
-        defaults.set(overlayShowTranslationLabel, forKey: Keys.overlayShowTranslationLabel)
         defaults.set(segmentPauseThreshold, forKey: Keys.segmentPauseThreshold)
         defaults.set(translationDebounceInterval, forKey: Keys.translationDebounceInterval)
         defaults.set(defaultInputMode, forKey: Keys.defaultInputMode)
         defaults.set(shiftBehavior, forKey: Keys.shiftBehavior)
         defaults.set(shiftLongPressThreshold, forKey: Keys.shiftLongPressThreshold)
+        defaults.set(speechEnabled, forKey: Keys.speechEnabled)
+        defaults.set(speechRate, forKey: Keys.speechRate)
+        defaults.set(overlayEnabled, forKey: Keys.overlayEnabled)
         
         // 强制同步，确保设置立即写入磁盘
         defaults.synchronize()

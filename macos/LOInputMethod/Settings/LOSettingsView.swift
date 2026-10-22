@@ -77,6 +77,20 @@ class LOSettingsView: NSView {
     /// 翻译相关区域的所有视图（开关关闭时统一隐藏）
     private var translationSectionViews: [NSView] = []
 
+    /// 语音播报开关
+    private var speechEnabledCheckbox: NSButton!
+
+    /// 悬浮窗显示开关
+    private var overlayEnabledCheckbox: NSButton!
+
+    /// 语音播报语速下拉框
+    private var speechRatePopup: NSPopUpButton!
+
+    /// 语速可选值（AVSpeechUtterance.rate，0.5 为系统默认）
+    private static let speechRateOptions: [(title: String, value: Double)] = [
+        ("慢", 0.4), ("正常", 0.5), ("快", 0.6)
+    ]
+
     /// 翻译服务下拉框
     private var providerPopup: NSPopUpButton!
 
@@ -170,12 +184,6 @@ class LOSettingsView: NSView {
     /// 翻译字体大小输入框
     private var translationFontSizeField: NSTextField!
     private var translationFontSizeStepper: NSStepper!
-
-    /// 显示原文标签复选框
-    private var showOriginalLabelCheckbox: NSButton!
-
-    /// 显示翻译标签复选框
-    private var showTranslationLabelCheckbox: NSButton!
 
     // MARK: - 当前设置
 
@@ -529,7 +537,7 @@ class LOSettingsView: NSView {
     // MARK: - 翻译设置内容
 
     private func makeTranslationContent() -> NSView {
-        translationStack.addArrangedSubview(makeTranslationToggleRow())
+        translationStack.addArrangedSubview(makeFeatureToggleRows())
         translationStack.addArrangedSubview(spacer(sectionSpacing))
         translationStack.addArrangedSubview(makeSeparator())
 
@@ -571,6 +579,25 @@ class LOSettingsView: NSView {
         translationSectionViews.append(spacer(sectionSpacing))
         translationStack.addArrangedSubview(translationSectionViews.last!)
         translationSectionViews.append(makeTargetLanguageRow())
+        translationStack.addArrangedSubview(translationSectionViews.last!)
+
+        translationSectionViews.append(spacer(sectionSpacing))
+        translationStack.addArrangedSubview(translationSectionViews.last!)
+        translationSectionViews.append(makeSeparator())
+        translationStack.addArrangedSubview(translationSectionViews.last!)
+
+        // === 语音播报 ===
+        translationSectionViews.append(spacer(sectionSpacing))
+        translationStack.addArrangedSubview(translationSectionViews.last!)
+        translationSectionViews.append(makeSectionHeader("语音播报"))
+        translationStack.addArrangedSubview(translationSectionViews.last!)
+        translationSectionViews.append(spacer(sectionSpacing))
+        translationStack.addArrangedSubview(translationSectionViews.last!)
+        translationSectionViews.append(makeDescriptionLabel("使用系统语音离线朗读，无需额外配置；翻译关闭时朗读原文"))
+        translationStack.addArrangedSubview(translationSectionViews.last!)
+        translationSectionViews.append(spacer(rowSpacing))
+        translationStack.addArrangedSubview(translationSectionViews.last!)
+        translationSectionViews.append(makeSpeechRateRow())
         translationStack.addArrangedSubview(translationSectionViews.last!)
 
         translationSectionViews.append(spacer(sectionSpacing))
@@ -753,12 +780,6 @@ class LOSettingsView: NSView {
         overlayStack.addArrangedSubview(spacer(sectionSpacing))
         overlayStack.addArrangedSubview(makeSeparator())
 
-        // === 标签显示 ===
-        overlayStack.addArrangedSubview(spacer(sectionSpacing))
-        overlayStack.addArrangedSubview(makeSectionHeader("标签显示"))
-        overlayStack.addArrangedSubview(spacer(sectionSpacing))
-        overlayStack.addArrangedSubview(makeLabelVisibilityRow())
-
         return wrapContent(overlayStack)
     }
 
@@ -794,39 +815,6 @@ class LOSettingsView: NSView {
     }
 
     /// 构建标签显隐复选框行（带缩进，与其他设置项的控件列对齐）
-    private func makeLabelVisibilityRow() -> NSView {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = rowSpacing
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        showOriginalLabelCheckbox = NSButton(checkboxWithTitle: "显示「原文」标签",
-                                              target: self, action: #selector(showOriginalLabelChanged))
-        showOriginalLabelCheckbox.font = NSFont.systemFont(ofSize: 13)
-
-        showTranslationLabelCheckbox = NSButton(checkboxWithTitle: "显示「翻译」标签",
-                                                 target: self, action: #selector(showTranslationLabelChanged))
-        showTranslationLabelCheckbox.font = NSFont.systemFont(ofSize: 13)
-
-        stack.addArrangedSubview(showOriginalLabelCheckbox)
-        stack.addArrangedSubview(showTranslationLabelCheckbox)
-
-        // 添加缩进，与其他设置项的控件列对齐
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.widthAnchor.constraint(equalToConstant: labelWidth + 6).isActive = true
-
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .top
-        row.spacing = 0
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.addArrangedSubview(spacer)
-        row.addArrangedSubview(stack)
-        return row
-    }
-
     // MARK: - 快捷键说明内容
 
     private func makeShortcutsContent() -> NSView {
@@ -985,12 +973,42 @@ class LOSettingsView: NSView {
 
     // MARK: - UI 辅助
 
-    /// 构建翻译功能开关行
-    private func makeTranslationToggleRow() -> NSView {
-        let checkbox = NSButton(checkboxWithTitle: "启用翻译", target: self, action: #selector(translationEnabledChanged))
-        checkbox.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        translationEnabledCheckbox = checkbox
-        return checkbox
+    /// 功能开关组：翻译、悬浮窗、播报相互独立，可任意组合
+    private func makeFeatureToggleRows() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        translationEnabledCheckbox = NSButton(
+            checkboxWithTitle: "启用翻译（调用翻译服务，可能产生费用）",
+            target: self, action: #selector(translationEnabledChanged))
+        translationEnabledCheckbox.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+
+        overlayEnabledCheckbox = NSButton(
+            checkboxWithTitle: "显示悬浮窗（关闭翻译时只显示原文）",
+            target: self, action: #selector(overlayEnabledChanged))
+        overlayEnabledCheckbox.font = NSFont.systemFont(ofSize: 13)
+
+        speechEnabledCheckbox = NSButton(
+            checkboxWithTitle: "语音播报（关闭翻译时朗读原文）",
+            target: self, action: #selector(speechEnabledChanged))
+        speechEnabledCheckbox.font = NSFont.systemFont(ofSize: 13)
+
+        stack.addArrangedSubview(translationEnabledCheckbox)
+        stack.addArrangedSubview(overlayEnabledCheckbox)
+        stack.addArrangedSubview(speechEnabledCheckbox)
+        return stack
+    }
+
+    /// 语音播报语速
+    private func makeSpeechRateRow() -> NSView {
+        speechRatePopup = NSPopUpButton()
+        speechRatePopup.addItems(withTitles: Self.speechRateOptions.map { $0.title })
+        speechRatePopup.target = self
+        speechRatePopup.action = #selector(speechRateChanged)
+        return makeRow(label: "语速：", control: speechRatePopup)
     }
 
     private func spacer(_ height: CGFloat) -> NSView {
@@ -1364,6 +1382,14 @@ class LOSettingsView: NSView {
         let langIndex = TargetLanguage.allCases.firstIndex(where: { $0.rawValue == settings.targetLanguage }) ?? 0
         targetLanguagePopup.selectItem(at: langIndex)
 
+        // 语音播报
+        speechEnabledCheckbox.state = settings.speechEnabled ? .on : .off
+        let rateIndex = Self.speechRateOptions.firstIndex { abs($0.value - settings.speechRate) < 0.01 } ?? 1
+        speechRatePopup.selectItem(at: rateIndex)
+
+        // 悬浮窗
+        overlayEnabledCheckbox.state = settings.overlayEnabled ? .on : .off
+
         // 位置模式
         let mode = settings.overlayPositionMode
         fixedRadio.state = (mode == "fixed") ? .on : .off
@@ -1407,10 +1433,6 @@ class LOSettingsView: NSView {
         // 字体大小
         applyRawValue(settings.overlayOriginalFontSize, to: originalFontSizeField, stepper: originalFontSizeStepper)
         applyRawValue(settings.overlayTranslationFontSize, to: translationFontSizeField, stepper: translationFontSizeStepper)
-
-        // 标签显隐
-        showOriginalLabelCheckbox.state = settings.overlayShowOriginalLabel ? .on : .off
-        showTranslationLabelCheckbox.state = settings.overlayShowTranslationLabel ? .on : .off
     }
 
     /// 把原始 settings 值同步到对应输入框（用 format 格式化显示）与 stepper
@@ -1473,6 +1495,24 @@ class LOSettingsView: NSView {
     /// 翻译开关切换
     @objc private func translationEnabledChanged() {
         settings.translationEnabled = (translationEnabledCheckbox.state == .on)
+        persistSettings()
+    }
+
+    /// 悬浮窗开关切换（独立于翻译）
+    @objc private func overlayEnabledChanged() {
+        settings.overlayEnabled = (overlayEnabledCheckbox.state == .on)
+        persistSettings()
+    }
+
+    @objc private func speechEnabledChanged() {
+        settings.speechEnabled = (speechEnabledCheckbox.state == .on)
+        persistSettings()
+    }
+
+    @objc private func speechRateChanged() {
+        let idx = speechRatePopup.indexOfSelectedItem
+        guard Self.speechRateOptions.indices.contains(idx) else { return }
+        settings.speechRate = Self.speechRateOptions[idx].value
         persistSettings()
     }
 
@@ -1671,16 +1711,6 @@ class LOSettingsView: NSView {
 
     @objc private func clickThroughChanged() {
         settings.overlayClickThrough = (clickThroughCheckbox.state == .on)
-        persistSettings()
-    }
-
-    @objc private func showOriginalLabelChanged() {
-        settings.overlayShowOriginalLabel = (showOriginalLabelCheckbox.state == .on)
-        persistSettings()
-    }
-
-    @objc private func showTranslationLabelChanged() {
-        settings.overlayShowTranslationLabel = (showTranslationLabelCheckbox.state == .on)
         persistSettings()
     }
 

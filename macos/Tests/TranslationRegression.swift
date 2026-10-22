@@ -10,6 +10,8 @@ func debugLog(_ message: String) {}
 struct LOSettings {
     static var value = LOSettings()
     var translationEnabled = true
+    var overlayEnabled = true
+    var speechEnabled = false
     var translationProvider = "custom"
     var translationModel = "synthetic-test-model"
     var customLLMBaseURL = "https://synthetic.test/v1/chat/completions"
@@ -209,6 +211,19 @@ extension TranslationCache {
         scheduler.updateTranslator()
         try await Task.sleep(nanoseconds: 150_000_000)
         check(callbacks.isEmpty, "provider replacement invalidates running request")
+        scheduler.reset()
+        // 翻译关闭但悬浮窗/播报仍开启：不调用翻译服务，只交付原文
+        LOSettings.value.translationEnabled = false
+        callbacks = []
+        scheduler.onTranslationReady = { text, translation in
+            check(translation == nil, "original-only delivery carries no translation")
+            callbacks.append("ready:\(text)")
+        }
+        scheduler.commit(text: "仅原文")
+        scheduler.regressionFire()
+        try await Task.sleep(nanoseconds: 150_000_000)
+        check(callbacks == ["ready:仅原文"], "translation disabled still delivers original text to overlay and speech")
+        LOSettings.value.translationEnabled = true
         scheduler.reset()
         print("\(checks) translation regression checks passed. All traffic used URLProtocol synthetic responses.")
     }

@@ -55,25 +55,13 @@ class LOTranslationOverlayView: NSView {
     /// 翻译字体大小
     private var translationFontSize: CGFloat = 14
 
-    /// 是否显示原文标签
-    private var showOriginalLabel: Bool = true
-
-    /// 是否显示翻译标签
-    private var showTranslationLabel: Bool = true
-
     // MARK: - 属性
-
-    /// 原文标题标签
-    private let originalTitleLabel: NSTextField
 
     /// 原文标签（多行自动换行，不截断）
     private let originalLabel: NSTextField
 
     /// 原文与翻译之间的分割线
     private let dividerView: NSView
-
-    /// 翻译标题标签
-    private let translationTitleLabel: NSTextField
 
     /// 翻译结果滚动容器
     private let translationScrollView: NSScrollView
@@ -105,9 +93,6 @@ class LOTranslationOverlayView: NSView {
     // MARK: - 初始化
 
     override init(frame frameRect: NSRect) {
-        // 原文标题
-        originalTitleLabel = LOTranslationOverlayView.makeTitleLabel(text: "原文")
-
         // 创建原文标签
         originalLabel = NSTextField(labelWithString: "")
         originalLabel.font = NSFont.systemFont(ofSize: originalFontSize, weight: .regular)
@@ -125,9 +110,6 @@ class LOTranslationOverlayView: NSView {
         dividerView = NSView()
         dividerView.wantsLayer = true
         dividerView.layer?.backgroundColor = Theme.dividerColor.cgColor
-
-        // 翻译标题
-        translationTitleLabel = LOTranslationOverlayView.makeTitleLabel(text: "翻译")
 
         // 创建翻译文本视图（可滚动、可换行、不截断）
         translationTextView = NSTextView()
@@ -183,10 +165,8 @@ class LOTranslationOverlayView: NSView {
     }
 
     required init?(coder: NSCoder) {
-        originalTitleLabel = LOTranslationOverlayView.makeTitleLabel(text: "原文")
         originalLabel = NSTextField(labelWithString: "")
         dividerView = NSView()
-        translationTitleLabel = LOTranslationOverlayView.makeTitleLabel(text: "翻译")
         translationTextView = NSTextView()
         translationScrollView = NSScrollView()
         copyButton = NSButton()
@@ -203,10 +183,8 @@ class LOTranslationOverlayView: NSView {
 
         // 添加子视图（不使用 Auto Layout 约束，改用手动 layout 避免 NSPanel
         // 根据 contentView fitting size 自动压缩窗口宽度）
-        addSubview(originalTitleLabel)
         addSubview(originalLabel)
         addSubview(dividerView)
-        addSubview(translationTitleLabel)
         addSubview(translationScrollView)
         addSubview(copyButton)
 
@@ -253,20 +231,6 @@ class LOTranslationOverlayView: NSView {
         copyButton.isHidden = !(isHovering && hasValidTranslation)
     }
 
-    /// 创建统一的小标题标签
-    private static func makeTitleLabel(text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = NSFont.systemFont(ofSize: Layout.titleFontSize, weight: .medium)
-        label.textColor = Theme.titleTextColor
-        label.lineBreakMode = .byClipping
-        label.maximumNumberOfLines = 1
-        label.isSelectable = false
-        label.isEditable = false
-        label.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        return label
-    }
-
     // MARK: - 绘制背景
 
     override func draw(_ dirtyRect: NSRect) {
@@ -297,8 +261,6 @@ class LOTranslationOverlayView: NSView {
         self.maxHeight = config.maxHeight
         self.originalFontSize = config.originalFontSize
         self.translationFontSize = config.translationFontSize
-        self.showOriginalLabel = config.showOriginalLabel
-        self.showTranslationLabel = config.showTranslationLabel
         self.clickThrough = config.clickThrough
 
         // 主题解析：auto 模式下根据系统外观选择预设颜色
@@ -322,10 +284,6 @@ class LOTranslationOverlayView: NSView {
         // 更新字体大小
         originalLabel.font = NSFont.systemFont(ofSize: originalFontSize, weight: .regular)
         translationTextView.font = NSFont.systemFont(ofSize: translationFontSize, weight: .medium)
-
-        // 更新标签显隐
-        originalTitleLabel.isHidden = !showOriginalLabel
-        translationTitleLabel.isHidden = !showTranslationLabel
 
         // 原文标签颜色
         originalLabel.textColor = originalTextColor
@@ -381,6 +339,17 @@ class LOTranslationOverlayView: NSView {
         needsDisplay = true
     }
 
+    /// 仅显示原文（翻译关闭时使用）：译文区留空，复制按钮置为不可用
+    /// - Parameter originalText: 原文
+    func showOriginalMode(_ originalText: String) {
+        isLoading = false
+        hasValidTranslation = false
+        originalLabel.stringValue = originalText
+        setTranslationText("")
+        updateCopyButtonAppearance()
+        needsDisplay = true
+    }
+
     /// 仅更新原文（防抖期间使用，避免闪烁）
     /// - Parameter text: 新的原文
     func updateOriginalOnly(_ text: String) {
@@ -427,26 +396,13 @@ class LOTranslationOverlayView: NSView {
         let viewWidth = contentWidth + padding * 2
 
         // 用确定的宽度测量各部分高度
-        let originalTitleSize = showOriginalLabel
-            ? originalTitleLabel.sizeThatFits(NSSize(width: contentWidth, height: .greatestFiniteMagnitude))
-            : .zero
         let originalSize = originalLabel.sizeThatFits(
             NSSize(width: contentWidth, height: .greatestFiniteMagnitude)
         )
-        let translationTitleSize = showTranslationLabel
-            ? translationTitleLabel.sizeThatFits(NSSize(width: contentWidth, height: .greatestFiniteMagnitude))
-            : .zero
 
-        // 累加高度：根据标签显隐决定是否计入
         var contentHeight: CGFloat = 0
-        if showOriginalLabel {
-            contentHeight += originalTitleSize.height + Layout.labelSpacing
-        }
         contentHeight += originalSize.height + Layout.sectionSpacing
         contentHeight += 1 + Layout.sectionSpacing // divider
-        if showTranslationLabel {
-            contentHeight += translationTitleSize.height + Layout.labelSpacing
-        }
         contentHeight += translationHeight
 
         let result = NSSize(
@@ -494,15 +450,6 @@ class LOTranslationOverlayView: NSView {
         // macOS 坐标系：左下角原点，从顶部向下布局
         var y = bounds.maxY - padding
 
-        // 原文标题（可隐藏）
-        if showOriginalLabel {
-            let origTitleH = originalTitleLabel.sizeThatFits(
-                NSSize(width: contentWidth, height: .greatestFiniteMagnitude)).height
-            originalTitleLabel.frame = NSRect(x: padding, y: y - origTitleH,
-                                              width: contentWidth, height: origTitleH)
-            y -= origTitleH + Layout.labelSpacing
-        }
-
         // 原文
         let origH = originalLabel.sizeThatFits(
             NSSize(width: contentWidth, height: .greatestFiniteMagnitude)).height
@@ -513,16 +460,6 @@ class LOTranslationOverlayView: NSView {
         // 分割线
         dividerView.frame = NSRect(x: padding, y: y - 1, width: contentWidth, height: 1)
         y -= 1 + Layout.sectionSpacing
-
-        // 翻译标题（复制按钮不再占行，改为浮在翻译区右侧）
-        if showTranslationLabel {
-            let transTitleH = translationTitleLabel.sizeThatFits(
-                NSSize(width: contentWidth, height: .greatestFiniteMagnitude)).height
-            translationTitleLabel.frame = NSRect(
-                x: padding, y: y - transTitleH,
-                width: contentWidth, height: transTitleH)
-            y -= transTitleH + Layout.labelSpacing
-        }
 
         // 翻译滚动视图（填满剩余空间）
         let scrollH = y - padding
