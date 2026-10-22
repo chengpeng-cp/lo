@@ -122,33 +122,48 @@ struct InputCoreRegression {
         let collapsedSelection = NSRange(location: 0, length: 0)
         check(LOTextInsertion.replacementRange(markedRange: noMarkedText, selectedRange: collapsedSelection) == collapsedSelection,
             "Unmarked commits target the insertion point instead of NSNotFound")
+        let electronAbsentMarked = NSRange(location: NSNotFound, length: NSIntegerMax)
+        check(LOTextInsertion.isAbsentMarkedRange(electronAbsentMarked),
+            "Electron clients report an absent marked range with NSIntegerMax length")
+        check(LOTextInsertion.replacementRange(markedRange: electronAbsentMarked, selectedRange: NSRange(location: 0, length: 0))
+                == NSRange(location: NSNotFound, length: 0),
+            "Electron clients receive no explicit range so punctuation lands at the real caret")
+        client.text = "abc\n"
+        client.selection = NSRange(location: 4, length: 0)
+        client.insertText("-", replacementRange: LOTextInsertion.replacementRange(
+            markedRange: electronAbsentMarked, selectedRange: NSRange(location: 0, length: 0)))
+        check(client.text == "abc\n-", "Symbol on an empty line in Electron clients appends at the caret, not position zero")
+        // 复位客户端，后续断言依赖空文档状态
+        client.text = ""
+        client.selection = NSRange(location: 0, length: 0)
         let activeMarkedRange = NSRange(location: 4, length: 3)
         check(LOTextInsertion.replacementRange(markedRange: activeMarkedRange, selectedRange: collapsedSelection) == activeMarkedRange,
             "Composition commits replace the active marked range")
         client.insertText("，", replacementRange: LOTextInsertion.replacementRange(
             markedRange: noMarkedText, selectedRange: client.selectedRange()))
         check(client.text == "，", "A leading punctuation commit inserts into an empty client")
-        var tracker = LOShiftTapTracker()
-        func flags(_ modifiers: NSEvent.ModifierFlags, at time: TimeInterval, keyCode: UInt16 = 56) -> NSEvent {
-            NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: modifiers,
-                timestamp: time, windowNumber: 0, context: nil, characters: "",
-                charactersIgnoringModifiers: "", isARepeat: false, keyCode: keyCode)!
+        var tap = LOShiftTapState()
+        func pollTap(_ shiftDown: Bool, at time: TimeInterval, other: Bool = false, mouse: Bool = false, nonMod: Bool = false) -> Bool {
+            LOShiftTapDecision.evaluate(
+                shiftDown: shiftDown, now: time, state: &tap,
+                otherModifiersHeld: other, mouseButtonDown: mouse,
+                nonModifierKeyDown: nonMod, threshold: 0.4)
         }
-        check(!tracker.shouldToggle(for: flags(.shift, at: 1), threshold: 0.4), "Shift down waits for release")
-        check(tracker.shouldToggle(for: flags([], at: 1.1), threshold: 0.4), "Short standalone Shift toggles")
-        _ = tracker.shouldToggle(for: flags(.shift, at: 2), threshold: 0.4)
-        tracker.noteKeyDown(modifiers: .shift)
-        check(!tracker.shouldToggle(for: flags([], at: 2.1), threshold: 0.4), "Shift letter chord never toggles")
-        _ = tracker.shouldToggle(for: flags(.shift, at: 3), threshold: 0.4)
-        check(!tracker.shouldToggle(for: flags([], at: 4), threshold: 0.4), "Long Shift never toggles")
-        tracker.reset(modifiers: .shift)
-        check(!tracker.shouldToggle(for: flags([], at: 5), threshold: 0.4), "Shift held during activation never toggles on release")
-        _ = tracker.shouldToggle(for: flags(.shift, at: 6), threshold: 0.4)
-        _ = tracker.shouldToggle(for: flags([.shift, .command], at: 6.05, keyCode: 55), threshold: 0.4)
-        _ = tracker.shouldToggle(for: flags(.shift, at: 6.07, keyCode: 55), threshold: 0.4)
-        check(!tracker.shouldToggle(for: flags([], at: 6.1), threshold: 0.4), "Shift Command chord never toggles")
-        _ = tracker.shouldToggle(for: flags(.shift, at: 7, keyCode: 0), threshold: 0.4)
-        check(tracker.shouldToggle(for: flags([], at: 7.1, keyCode: 0), threshold: 0.4), "Modifier fallback supports remote keyboard keyCode zero")
+        check(!pollTap(true, at: 1), "Shift down waits for release")
+        check(pollTap(false, at: 1.1), "Short standalone Shift toggles")
+        _ = pollTap(true, at: 2)
+        check(!pollTap(true, at: 2.05, nonMod: true), "Shift letter chord marks the non-modifier key")
+        check(!pollTap(false, at: 2.1), "Shift letter chord never toggles")
+        _ = pollTap(true, at: 3)
+        check(!pollTap(false, at: 4), "Long Shift never toggles")
+        // 激活输入法时 Shift 已处于按住状态（downAt 为空）：松开不触发切换
+        check(!pollTap(false, at: 5), "Shift held during activation never toggles on release")
+        _ = pollTap(true, at: 6)
+        _ = pollTap(true, at: 6.05, other: true)
+        _ = pollTap(true, at: 6.07, other: true)
+        check(!pollTap(false, at: 6.1), "Shift Command chord never toggles")
+        _ = pollTap(true, at: 7)
+        check(pollTap(false, at: 7.1), "Modifier fallback supports remote keyboard keyCode zero")
 
         let session = engine.createSession()
         defer { engine.destroySession(session) }

@@ -130,6 +130,10 @@ jobs:
           )
           %NSIS_EXE% /DAPP_VERSION=${{ steps.ver.outputs.version }} installer.nsi
 
+      - name: Build NSIS uninstaller
+        shell: cmd
+        run: windows\scripts\build-uninstaller.bat ${{ steps.ver.outputs.version }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -172,6 +176,9 @@ jobs:
             3. 安装完成后,使用 Win+Space 切换到语境输入法即可
 
             **系统要求**：Windows 10 1809+ 或 Windows 11,64 位系统
+
+            **彻底卸载 / 重装前清理**：下载 `LOInputMethod-Uninstaller-${{ steps.ver.outputs.version }}.exe`，
+            运行后可清除程序文件、TSF/COM 注册、输入法排序残留，以及本地词库、设置与 API Key。
 
             ## 功能特点
 

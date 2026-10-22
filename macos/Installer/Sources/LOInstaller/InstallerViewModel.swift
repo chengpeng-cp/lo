@@ -180,6 +180,15 @@ final class InstallerViewModel: ObservableObject {
     /// 在普通用户会话中注册输入源，核对可见名称后再刷新菜单并启动。
     /// LaunchServices 注册 bundle 与 TIS 注册输入源是两步，安装器都显式完成。
     private func registerInputSourceAndLaunch(targetPath: String) {
+        // macOS 15 的 TIS API 内部断言必须运行在主队列，后台调用会触发
+        // dispatch_assert_queue_fail（EXC_BREAKPOINT / SIGTRAP）导致安装器崩溃。
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.registerInputSourceAndLaunch(targetPath: targetPath)
+            }
+            return
+        }
+
         let url = URL(fileURLWithPath: targetPath)
         let status = TISRegisterInputSource(url as CFURL)
         guard status == noErr else {
@@ -249,44 +258,44 @@ final class InstallerViewModel: ObservableObject {
     }
 
     /// TIS 把带模式的输入法拆成 bundle 父来源和具体输入模式。键盘设置
-    /// 读取 AppleEnabledInputSources；不能只凭 TIS 返回 noErr 判定已加入列表。
+    /// 读取 AppleEnabledThirdPartyInputSources；不能只凭 TIS 返回 noErr
+    /// 判定已加入列表。
     private func enableInputSources() -> String? {
         for sourceID in [bundleId, "\(bundleId).pinyin"] {
             guard let source = inputSource(id: sourceID, includeAll: true) else { continue }
+            // 已启用的来源跳过 TISEnableInputSource：该 API 会弹出
+            // 「允许“语境输入法安装器”启用“语境输入法”？」系统提示，
+            // 重复安装时不应再次打扰用户。
+            if let enabledPointer = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsEnabled),
+               CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque(enabledPointer).takeUnretainedValue()) {
+                continue
+            }
             let status = TISEnableInputSource(source)
             if status != noErr {
                 NSLog("[LOInstaller] TISEnableInputSource(%@) returned %d; persisting enabled source list", sourceID, status)
             }
         }
 
+        // 只写入第三方输入源列表。若同时写入 com.apple.HIToolbox 的
+        // AppleEnabledInputSources，macOS 15 会把同一个拼音模式枚举两次，
+        // 键盘设置的“所有输入法”里出现一堆重复条目。
         let modeID = "\(bundleId).pinyin"
-        let hitoolboxEntries: [[String: String]] = [
-            ["Bundle ID": bundleId, "InputSourceKind": "Keyboard Input Method"],
-            ["Bundle ID": bundleId, "Input Mode": modeID, "InputSourceKind": "Input Mode"]
-        ]
         let thirdPartyEntries: [[String: String]] = [
             ["Bundle ID": bundleId, "Input Mode": modeID, "InputSourceKind": "Input Mode"],
             ["Bundle ID": bundleId, "InputSourceKind": "Keyboard Input Method"]
         ]
 
-        let errors = [
-            persistEnabledInputSourcePreferences(
-                domain: "com.apple.HIToolbox",
-                key: "AppleEnabledInputSources",
-                required: hitoolboxEntries
-            ),
-            persistEnabledInputSourcePreferences(
-                domain: "com.apple.inputsources",
-                key: "AppleEnabledThirdPartyInputSources",
-                required: thirdPartyEntries
-            )
-        ].compactMap { $0 }
-        return errors.isEmpty ? nil : errors.joined(separator: "; ")
+        let error = persistEnabledInputSourcePreferences(
+            domain: "com.apple.inputsources",
+            key: "AppleEnabledThirdPartyInputSources",
+            required: thirdPartyEntries
+        )
+        return error
     }
 
     /// Persist the entries used by System Settings for enabled keyboard sources.
-    /// TISEnableInputSource may return noErr without changing these preferences, so
-    /// verify both the legacy HIToolbox list and the third-party input source list.
+    /// TISEnableInputSource may return noErr without changing these preferences,
+    /// so the third-party input source list is persisted and verified.
     private func persistEnabledInputSourcePreferences(
         domain domainName: String,
         key keyName: String,

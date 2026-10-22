@@ -12,7 +12,7 @@ SYSTEM_BUNDLE_PATH := $(SYSTEM_INSTALL_DIR)/$(APP_NAME).app
 # lsregister 完整路径（用于 LaunchServices 注册/注销，防止输入法列表重复）
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
 
-.PHONY: build install install-full clean uninstall restart fetch-dict install-dict clean-trash package
+.PHONY: build install install-full clean uninstall uninstall-clean restart fetch-dict install-dict clean-trash package package-uninstaller
 
 ## 下载 rime-ice 社区词库到源码 Resources/rime/cn_dicts/
 fetch-dict:
@@ -51,22 +51,19 @@ clean-trash:
 	@find "$(HOME)/.Trash" -maxdepth 1 -name "$(APP_NAME)*" -exec rm -rf {} + 2>/dev/null || true
 	@echo "废纸篓清理完成。"
 
-## 卸载输入法
+## 卸载输入法（保留词库与设置）
 uninstall:
-	-@killall $(APP_NAME) 2>/dev/null || true
-	@# 注销 LaunchServices 注册并删除用户级 bundle
-	@"$(LSREGISTER)" -u "$(BUNDLE_PATH)" 2>/dev/null || true
-	@rm -rf "$(BUNDLE_PATH)"
-	@# 若系统级也存在则一并注销删除（需 sudo）
-	@if [ -d "$(SYSTEM_BUNDLE_PATH)" ]; then \
-		"$(LSREGISTER)" -u "$(SYSTEM_BUNDLE_PATH)" 2>/dev/null || true; \
-		sudo rm -rf "$(SYSTEM_BUNDLE_PATH)" 2>/dev/null || \
-			echo "  （系统级副本需手动删除: sudo rm -rf \"$(SYSTEM_BUNDLE_PATH)\"）"; \
-	fi
-	@killall TextInputMenuAgent 2>/dev/null || true
-	@echo "已卸载 $(APP_NAME)。"
+	@bash scripts/uninstall.sh --yes
 
-## 一键打包发布：构建输入法 + 安装器，生成 .dmg 安装镜像
-## 产物：dist/语境输入法-<版本>.dmg，用户下载后双击安装器即可一键安装到系统
+## 彻底清理（含 Rime 词库/用户词典/Keychain），测试新包前使用
+uninstall-clean:
+	@bash scripts/uninstall.sh --purge --yes
+
+## 一键打包发布：输入法 + 安装器 + 卸载工具，生成单个 .dmg 安装镜像
+## 产物：dist/语境输入法-<版本>.dmg（内含安装器与卸载工具）
 package:
 	@bash scripts/package.sh
+
+## 仅开发用：单独打一个卸载工具 DMG（正式发布不单独分发）
+package-uninstaller:
+	@bash scripts/package-uninstaller.sh

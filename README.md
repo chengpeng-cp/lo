@@ -40,7 +40,7 @@
 **系统要求**：下载与你的 CPU 架构和系统版本匹配的安装包。源码的 Swift 部署目标为 macOS 13，但最终安装包的最低系统版本取决于 librime 等依赖；打包脚本会将真实最低版本写入应用。当前构建为本机架构，不会自动生成 Universal 安装包。
 
 1. 下载 `LOInputMethod-<version>.dmg`
-2. 双击挂载 DMG，将「语境输入法安装器」拖到「应用程序」文件夹
+2. 双击挂载 DMG，将「语境输入法安装器」拖到「应用程序」文件夹（同一镜像内还带有「语境输入法卸载工具」，重装或测试前用它清理旧版本）
 3. 打开「应用程序」中的「语境输入法安装器」，按提示完成安装
 4. 安装器会登记并启用「语境输入法」；打开「系统设置 → 键盘 → 输入法」确认后，用 `Ctrl + Space` 切换。如果安装后列表仍未刷新，请注销并重新登录再检查
 
@@ -54,17 +54,63 @@
 2. 双击运行，按提示完成安装（需要管理员权限以注册 TSF 输入法）
 3. 安装完成后，使用 `Win + Space` 切换到「语境输入法」即可开始使用
 
+## 🧹 卸载与彻底清理
+
+只删除 `.app` / 安装目录是不够的：输入法还会留下输入源注册、LaunchServices 记录、Rime 部署缓存、Keychain 中的 API Key 等。这些残留会让重装后的输入法列表出现重复项，或让新版本继续使用旧词库缓存。仓库为两个平台都提供了专门的卸载工具。
+
+### macOS
+
+**图形界面（推荐）**：安装镜像里已经带好「语境输入法卸载工具」——挂载 `LOInputMethod-<version>.dmg` 后直接运行它，无需再下载第二个包。工具会先扫描并列出来自以下位置的残留（含体积），确认后一键清理：
+
+| 类别 | 位置 |
+|------|------|
+| 应用与副本 | `/Library/Input Methods/LOInputMethod.app`、`~/Library/Input Methods/`、安装器临时目录、废纸篓中的旧副本 |
+| 系统注册 | LaunchServices 记录、`AppleEnabledInputSources` / `AppleEnabledThirdPartyInputSources` 中的输入源条目、辅助功能与输入监听授权（TCC） |
+| 偏好设置 | `~/Library/Preferences/com.lo.inputmethod*.plist`（含 ByHost） |
+| 钥匙串 | 服务名为 `com.lo.inputmethod` 的翻译 API Key |
+| 用户数据 | `~/Library/Application Support/LOInputMethod`、`~/Library/Rime`（词库、用户词典、部署缓存、日志） |
+| 日志与缓存 | `~/Library/Logs/LOInputMethod`、崩溃报告、Caches、Saved Application State |
+
+默认勾选「同时清空 Rime 词库与用户词典」——这是避免旧词频和旧部署缓存干扰新版本的关键；需要保留时可取消勾选，或先勾选「备份到桌面」。若检测到鼠须管（Squirrel）等同样使用 `~/Library/Rime` 的输入法，工具只会删除语境输入法自己的文件。
+
+**命令行（适合反复回归测试）**：
+
+```bash
+cd macos
+bash scripts/uninstall.sh --dry-run     # 只扫描，不改动任何文件
+bash scripts/uninstall.sh --purge       # 彻底清理（含词库、设置、API Key）
+make uninstall-clean                    # 等价的 Makefile 入口
+make package                            # 打安装镜像（自动内置卸载工具）
+bash scripts/package-uninstaller.sh     # 仅开发用：单独打一个卸载工具 DMG
+```
+
+`--purge --backup ~/Desktop` 可在清空前把 Rime 与偏好设置备份到桌面；`--force-rime` 会强制整体删除 `~/Library/Rime`（默认遇到其他输入法数据时会保留）。
+
+### Windows
+
+**图形界面（推荐）**：从 Releases 下载 `LOInputMethod-Uninstaller-<version>.exe` 并运行。工具会注销 TSF/COM 组件、删除程序文件与快捷方式、清理 CTF `TIP`/`Assemblies`/`SortOrder` 中的残留排序项；「清空本地词库、设置与 API Key」默认勾选，对应 `%LOCALAPPDATA%\LOInputMethod`（Rime 词库、用户词典、`apikeys.dat`、翻译缓存与日志）和 `HKCU\Software\LOInputMethod`。
+
+也可以使用「设置 → 应用 → 已安装的应用」中的卸载项；安装包内置的 `uninstall.exe` 与本工具使用同一套清理逻辑，但本工具在安装目录损坏、`uninstall.exe` 丢失时仍然可用。
+
+```bat
+windows\scripts\build-uninstaller.bat 1.0.0   :: 本地生成卸载工具
+windows\scripts\package.bat                   :: 同时生成安装包与卸载工具
+```
+
+> 卸载后建议注销并重新登录（Windows 可重启）再安装新版本，确保系统输入法列表完全刷新。
+
 ## ⌨️ 快捷键
 
 | 功能 | macOS | Windows |
 |------|-------|---------|
 | 切换输入法 | `Ctrl + Space` | `Win + Space` |
-| 中英文切换 | `Shift` | `Shift` |
-| CapsLock 切换 ABC | 原生支持 | — |
+| 中英文切换 | 中/英键（CapsLock，切系统 ABC，再按切回语境） | `Shift` |
 | 复制翻译内容 | `⌃ ⌘ ,`（Ctrl+Cmd+逗号） | `Ctrl + Alt + ,` |
 | 选择候选词 | 数字键 `1–9` | 数字键 `1–9` |
 | 确认候选词 | `Space` | `Space` |
 | 导航候选词 | `← → ↑ ↓` | `← → ↑ ↓` |
+
+> 中英文切换默认走「系统输入源」，与微信输入法、macOS 自带中文输入法一致：按中/英键（CapsLock）切到 ABC，再按切回语境，菜单栏会同步显示当前输入源。该方案需要在「系统设置 → 隐私与安全性 → 辅助功能」中授权语境输入法（用于拦截 CapsLock，避免触发大写锁定），未授权时会自动退回 Shift 短按切换。
 
 悬浮窗也提供一键复制按钮，点一下即可复制当前翻译结果。
 

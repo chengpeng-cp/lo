@@ -6,6 +6,8 @@ case "$DEST" in *.app) ;; *) echo 'Output must be an .app bundle' >&2; exit 1 ;;
 rm -rf "$DEST"
 mkdir -p "$DEST/Contents/MacOS" "$DEST/Contents/Resources"
 cp "$ROOT_DIR/.build/release/LOInputMethod" "$DEST/Contents/MacOS/"
+# 输入源切换助手：输入法进程内选择自身会握手弹跳，必须以独立进程执行 TISSelectInputSource
+cp "$ROOT_DIR/.build/release/LOSourceSwitcher" "$DEST/Contents/MacOS/"
 cp "$ROOT_DIR/LOInputMethod/Info.plist" "$DEST/Contents/"
 cp -R "$ROOT_DIR/LOInputMethod/Resources/." "$DEST/Contents/Resources/"
 INSTALL_DIR="$DEST" bash "$ROOT_DIR/scripts/build-librime.sh"
@@ -14,6 +16,8 @@ MIN_OS="$(otool -l "$DEST/Contents/MacOS/LOInputMethod" "$DEST/Contents/Framewor
 if [ -n "$MIN_OS" ]; then
     /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MIN_OS" "$DEST/Contents/Info.plist"
 fi
-codesign --force --deep --options runtime --identifier com.lo.inputmethod.ime -s - "$DEST"
+# CODESIGN_IDENTITY 可指定稳定的开发证书；默认 ad-hoc（CI 无证书）
+IDENTITY="${CODESIGN_IDENTITY:--}"
+codesign --force --deep --options runtime --identifier com.lo.inputmethod.ime -s "$IDENTITY" "$DEST"
 codesign --verify --deep --strict "$DEST"
 echo "Assembled $DEST (minimum macOS $MIN_OS, $(lipo -archs "$DEST/Contents/MacOS/LOInputMethod"))"
