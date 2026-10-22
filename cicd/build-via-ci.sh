@@ -36,7 +36,7 @@ fi
 # 解析参数
 WATCH=false
 TAG=""
-PLATFORM="both"
+PLATFORM="mac"
 ARGS=("$@")
 for arg in "${ARGS[@]}"; do
     case "$arg" in
@@ -89,8 +89,11 @@ fi
 WORKFLOWS=()
 case "$PLATFORM" in
     mac)     WORKFLOWS=("build-macos.yml") ;;
-    windows) WORKFLOWS=("build-windows.yml") ;;
-    both)    WORKFLOWS=("build-macos.yml" "build-windows.yml") ;;
+    windows)
+        echo "错误：Windows 端尚未完成调试，构建工作流已停用（build-windows.yml.disabled）"
+        exit 1
+        ;;
+    both)    WORKFLOWS=("build-macos.yml") ;;
 esac
 
 RUN_IDS=()

@@ -3,15 +3,15 @@ macos/.build/
 macos/.swiftpm/
 macos/Package.resolved
 macos/dist/
-windows/dist/
 
 # ===== rime 词库（按需下载，不入库）=====
 macos/LOInputMethod/Resources/rime/cn_dicts/
-windows/resources/rime/cn_dicts/
 
 # ===== 旧版繁体词典备份（本地保留参考，不入库）=====
 macos/LOInputMethod/Resources/rime/luna_pinyin.dict.yaml.legacy
-windows/resources/rime/luna_pinyin.dict.yaml.legacy
+
+# ===== Windows 端（尚未完成调试，暂不入库、不随本次开源发布）=====
+windows/
 
 # ===== 私密文档/脚手架（本地保留，不入库）=====
 .trae/
@@ -33,14 +33,24 @@ credentials.*
 *_credentials.*
 *.pem
 *.key
+*.p8
+*.cer
+*.der
 *.p12
 *.pfx
 *.keystore
+*.mobileprovision
+.netrc
 id_rsa
 id_ed25519
 
+# ===== Xcode 本机数据 =====
+xcuserdata/
+*.xcuserstate
+
 # ===== 日志（软链接到 ~/Library/Logs/LOInputMethod/translation.log）=====
 log/
+*.log
 todolist.md
 
 # ===== 系统文件 =====

@@ -1,6 +1,11 @@
 # ============================================================================
 # 语境输入法 Windows 版 - 自动构建与打包
 #
+# 【已停用】Windows 端尚未完成调试，暂不对外发布。
+# 该文件扩展名为 .disabled，GitHub Actions 不会加载；同时 windows/ 已加入
+# .gitignore 并从仓库索引移除。待 Windows 端调试完成后再改回 .yml 并恢复
+# windows/ 的版本跟踪。
+#
 # 触发方式：
 #   1. 推送 tag（v*）           → 构建并发布 Release
 #   2. 手动触发（workflow_dispatch）→ 构建并上传 artifact
