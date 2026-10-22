@@ -6,6 +6,8 @@ case "$DEST" in *.app) ;; *) echo 'Output must be an .app bundle' >&2; exit 1 ;;
 rm -rf "$DEST"
 mkdir -p "$DEST/Contents/MacOS" "$DEST/Contents/Resources"
 cp "$ROOT_DIR/.build/release/LOInputMethod" "$DEST/Contents/MacOS/"
+# 输入源切换助手：输入法进程内选择自身会握手弹跳，必须以独立进程执行 TISSelectInputSource
+cp "$ROOT_DIR/.build/release/LOSourceSwitcher" "$DEST/Contents/MacOS/"
 cp "$ROOT_DIR/LOInputMethod/Info.plist" "$DEST/Contents/"
 cp -R "$ROOT_DIR/LOInputMethod/Resources/." "$DEST/Contents/Resources/"
 INSTALL_DIR="$DEST" bash "$ROOT_DIR/scripts/build-librime.sh"

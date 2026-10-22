@@ -103,30 +103,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// 带模式的输入法需要先启用 bundle 父来源，再启用具体输入模式。
-    /// TIS API 在部分 macOS 版本上可能对键盘模式静默无操作；同时持久化
+    /// TIS API 在部分 macOS 版本上可能对键盘模式静默无操作，因此持久化
     /// System Settings 实际读取的输入源偏好并回读验证。
+    /// 注意：这里不要调用 TISEnableInputSource —— 它会弹出
+    /// 「允许“语境输入法”启用“语境输入法”？」的系统提示，且每次启动都会重复。
     private func enableInputSources() -> String? {
         guard let bundleId = Bundle.main.bundleIdentifier else {
             return "无法读取输入法 Bundle ID"
         }
 
-        for sourceID in [bundleId, "\(bundleId).pinyin"] {
-            if let source = inputSource(id: sourceID, includeAll: true) {
-                let status = TISEnableInputSource(source)
-                if status != noErr {
-                    debugLog("TISEnableInputSource(\(sourceID)) 返回 \(status)，将写入已启用列表偏好")
-                }
-            }
-        }
-
-        let hitoolboxEntries: [[String: String]] = [
-            ["Bundle ID": bundleId, "InputSourceKind": "Keyboard Input Method"],
-            [
-                "Bundle ID": bundleId,
-                "Input Mode": "\(bundleId).pinyin",
-                "InputSourceKind": "Input Mode"
-            ]
-        ]
+        // 只写入第三方输入源列表。同时写入 com.apple.HIToolbox 的
+        // AppleEnabledInputSources 会让 macOS 15 把同一模式枚举两次，
+        // 系统设置里出现重复的输入法条目。
         let thirdPartyEntries: [[String: String]] = [
             [
                 "Bundle ID": bundleId,
@@ -136,19 +124,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ["Bundle ID": bundleId, "InputSourceKind": "Keyboard Input Method"]
         ]
 
-        let errors = [
-            persistEnabledInputSourcePreferences(
-                domain: "com.apple.HIToolbox",
-                key: "AppleEnabledInputSources",
-                required: hitoolboxEntries
-            ),
-            persistEnabledInputSourcePreferences(
-                domain: "com.apple.inputsources",
-                key: "AppleEnabledThirdPartyInputSources",
-                required: thirdPartyEntries
-            )
-        ].compactMap { $0 }
-        return errors.isEmpty ? nil : errors.joined(separator: "; ")
+        return persistEnabledInputSourcePreferences(
+            domain: "com.apple.inputsources",
+            key: "AppleEnabledThirdPartyInputSources",
+            required: thirdPartyEntries
+        )
     }
 
     private func persistEnabledInputSourcePreferences(

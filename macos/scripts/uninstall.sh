@@ -174,6 +174,10 @@ collect_user_items() {
     add_glob "$GROUP_APP" "$d/Input Methods/$APP_NAME.app.*"
     add_glob "$GROUP_APP" "$d/Input Methods/.lo-install.*"
 
+    # 安装/卸载调试过程中留在 /private/tmp 的旧副本。它们曾被 LaunchServices
+    # 索引，是“键盘设置里出现一堆同名输入法”的常见来源。
+    add_glob "$GROUP_APP" "/private/tmp/lo-old-*"
+
     # 偏好设置（含 ByHost 变体）
     add_item "$GROUP_SETTINGS" "$d/Preferences/$BUNDLE_ID.plist"
     add_item "$GROUP_SETTINGS" "$d/Preferences/$INSTALLER_BUNDLE_ID.plist"
@@ -315,10 +319,33 @@ quit_app() {
     fi
 }
 
+# 输出 LaunchServices 中属于语境输入法家族的注册路径。
+# 覆盖 DMG 挂载卷、废纸篓、/private/tmp 旧副本等任意位置，
+# 避免只注销固定路径而漏掉历史残留。
+registered_paths() {
+    "$LSREGISTER" -dump 2>/dev/null | awk '
+        /^path:/ { p=$0; sub(/^path:[ \t]*/, "", p); sub(/ \(0x[0-9a-f]+\)$/, "", p) }
+        /^identifier:/ {
+            if ($2 == "com.lo.inputmethod.ime" ||
+                $2 == "com.lo.inputmethod.installer" ||
+                $2 == "com.lo.inputmethod.uninstaller") print p
+            p = ""
+        }'
+}
+
 unregister_launch_services() {
     step "清理 LaunchServices 注册（防止输入法列表出现重复项）…"
     [ -x "$LSREGISTER" ] || return 0
+
+    # root 阶段看到的是 root 的 LaunchServices 上下文，扫不到当前用户的注册。
     local p
+    if [ "$IS_ROOT" -ne 1 ]; then
+        while IFS= read -r p; do
+            [ -n "$p" ] || continue
+            "$LSREGISTER" -u "$p" >/dev/null 2>&1 || true
+        done < <(registered_paths)
+    fi
+
     for p in \
         "$SYSTEM_DIR/$APP_NAME.app" \
         "$HOME_DIR/Library/Input Methods/$APP_NAME.app" \
@@ -331,6 +358,8 @@ unregister_launch_services() {
         [ -e "$f" ] || continue
         "$LSREGISTER" -u "$f" >/dev/null 2>&1 || true
     done
+    # 回收已删除副本留下的数据库记录
+    "$LSREGISTER" -gc >/dev/null 2>&1 || true
 }
 
 unregister_input_source() {

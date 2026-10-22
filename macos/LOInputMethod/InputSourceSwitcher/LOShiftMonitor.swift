@@ -1,6 +1,70 @@
 import AppKit
 import Carbon.HIToolbox
 
+// MARK: - Shift 短按判定核心（纯逻辑，便于回归测试）
+
+/// 一次 Shift 短按观测的进行中状态
+struct LOShiftTapState {
+    var downAt: TimeInterval?
+    var cancelled = false
+    var sawNonModifierKey = false
+}
+
+/// 轮询喂入修饰键状态并判定是否构成「短按 Shift」。
+/// 取消规则：Shift 期间按过其他键、按过鼠标、或按住超过阈值，都不算一次切换，
+/// 避免 Shift+字母、Shift+方向键、Shift+点击选中被误判。
+enum LOShiftTapDecision {
+
+    /// - Parameters:
+    ///   - shiftDown: 本次轮询时 Shift 是否按下
+    ///   - now: 当前单调时钟（ProcessInfo.systemUptime）
+    ///   - state: 跨轮询保存的观测状态
+    ///   - otherModifiersHeld: Shift 之外是否还有 Cmd/Ctrl/Option 按下
+    ///   - mouseButtonDown: 是否有鼠标键按下
+    ///   - nonModifierKeyDown: 是否有非修饰键处于按下状态（ABC 激活时输入法
+    ///     收不到 keyDown，用全局按键状态识别 Shift+A 这类组合）
+    ///   - threshold: 长按阈值（秒）
+    /// - Returns: 是否应触发一次切换
+    static func evaluate(
+        shiftDown: Bool,
+        now: TimeInterval,
+        state: inout LOShiftTapState,
+        otherModifiersHeld: Bool,
+        mouseButtonDown: Bool,
+        nonModifierKeyDown: @autoclosure () -> Bool,
+        threshold: TimeInterval
+    ) -> Bool {
+        if shiftDown {
+            if state.downAt == nil {
+                state.downAt = now
+                // 进入时已经按着鼠标（Shift+点击）不算切换
+                state.cancelled = mouseButtonDown
+            } else if mouseButtonDown {
+                state.cancelled = true
+            }
+            if otherModifiersHeld {
+                state.cancelled = true
+            }
+            if !state.sawNonModifierKey, nonModifierKeyDown() {
+                state.sawNonModifierKey = true
+            }
+            return false
+        }
+
+        guard let start = state.downAt else {
+            // Shift 早已按下（如激活输入法时已按住）：松开不算切换
+            state.sawNonModifierKey = false
+            return false
+        }
+        state.downAt = nil
+
+        let duration = now - start
+        let isShortTap = !state.cancelled && !state.sawNonModifierKey && duration >= 0 && duration < threshold
+        state.sawNonModifierKey = false
+        return isShortTap
+    }
+}
+
 // MARK: - Shift 短按监听（免辅助功能权限）
 
 /// 通过轮询修饰键状态识别「短按 Shift」。
@@ -11,8 +75,8 @@ import Carbon.HIToolbox
 /// 不依赖 App 的事件转发，也不需要辅助功能权限。
 ///
 /// 短按行为由 `LOSettings.shiftBehavior` 决定：
-/// - switch_source：切系统 ABC ↔ 语境（默认）
-/// - toggle_ascii：只切 Rime 内部中英文
+/// - toggle_ascii：只切 Rime 内部中英文（默认，与微信输入法一致）
+/// - switch_source：切系统 ABC ↔ 语境
 ///
 /// 取消规则：Shift 期间按过其他键、按过鼠标、或按住超过阈值，都不算一次切换，
 /// 避免 Shift+字母、Shift+方向键、Shift+点击选中被误判。
@@ -21,11 +85,7 @@ final class LOShiftMonitor {
     static let shared = LOShiftMonitor()
 
     private var timer: Timer?
-    private var shiftDownAt: TimeInterval?
-    private var cancelled = false
-    /// Shift 按下期间是否出现过普通按键。它不依赖轮询是否已经捕获到 Shift，
-    /// 避免快速 Shift+A 落在两次轮询之间时被误判为短按切换。
-    private var sawNonModifierKey = false
+    private var tapState = LOShiftTapState()
     /// 防止 App Nap 把 30ms 轮询降频，导致短按漏判
     private var activity: NSObjectProtocol?
     private var settingsObserver: NSObjectProtocol?
@@ -61,9 +121,7 @@ final class LOShiftMonitor {
     func stop() {
         timer?.invalidate()
         timer = nil
-        shiftDownAt = nil
-        cancelled = false
-        sawNonModifierKey = false
+        tapState = LOShiftTapState()
         if let settingsObserver = settingsObserver {
             NotificationCenter.default.removeObserver(settingsObserver)
             self.settingsObserver = nil
@@ -77,46 +135,24 @@ final class LOShiftMonitor {
     /// 任意非修饰键按下都取消本次短按
     func noteKeyDown(keyCode: UInt16) {
         guard !RimeEngine.isModifierKeycode(keyCode) else { return }
-        if shiftDownAt != nil || NSEvent.modifierFlags.contains(.shift) {
-            sawNonModifierKey = true
+        if tapState.downAt != nil || NSEvent.modifierFlags.contains(.shift) {
+            tapState.sawNonModifierKey = true
         }
     }
 
     private func poll() {
-        let shiftDown = NSEvent.modifierFlags.contains(.shift)
-        let now = ProcessInfo.processInfo.systemUptime
-
-        if shiftDown {
-            if shiftDownAt == nil {
-                shiftDownAt = now
-                // 进入时已经按着鼠标（Shift+点击）不算切换
-                cancelled = NSEvent.pressedMouseButtons != 0
-            } else if NSEvent.pressedMouseButtons != 0 {
-                cancelled = true
-            }
-
-            let flags = NSEvent.modifierFlags
-            if flags.contains(.command) || flags.contains(.control) || flags.contains(.option) {
-                cancelled = true
-            }
+        let flags = NSEvent.modifierFlags
+        let toggled = LOShiftTapDecision.evaluate(
+            shiftDown: flags.contains(.shift),
+            now: ProcessInfo.processInfo.systemUptime,
+            state: &tapState,
+            otherModifiersHeld: flags.contains(.command) || flags.contains(.control) || flags.contains(.option),
+            mouseButtonDown: NSEvent.pressedMouseButtons != 0,
             // ABC 激活时输入法收不到 keyDown，用全局按键状态识别 Shift+A 这类组合
-            if !sawNonModifierKey, hasNonModifierKeyDown() {
-                sawNonModifierKey = true
-            }
-            return
-        }
-
-        guard let start = shiftDownAt else {
-            sawNonModifierKey = false
-            return
-        }
-        shiftDownAt = nil
-
-        let duration = now - start
-        let threshold = settings.shiftLongPressThreshold > 0 ? settings.shiftLongPressThreshold : 0.4
-        let isShortTap = !cancelled && !sawNonModifierKey && duration >= 0 && duration < threshold
-        sawNonModifierKey = false
-        guard isShortTap else { return }
+            nonModifierKeyDown: hasNonModifierKeyDown(),
+            threshold: settings.shiftLongPressThreshold > 0 ? settings.shiftLongPressThreshold : 0.4
+        )
+        guard toggled else { return }
 
         if settings.shiftBehavior == "switch_source" {
             _ = LOSystemInputSourceSwitcher.shared.toggleFromShift()

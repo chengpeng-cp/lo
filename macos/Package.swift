@@ -13,6 +13,10 @@ let package = Package(
         .executable(
             name: "LOInputMethod",
             targets: ["LOInputMethod"]
+        ),
+        .executable(
+            name: "LOSourceSwitcher",
+            targets: ["LOSourceSwitcher"]
         )
     ],
     dependencies: [],
@@ -36,6 +40,12 @@ let package = Package(
             resources: [
                 .copy("Resources/rime")
             ]
+        ),
+        // 输入源切换助手：必须以独立进程执行 TISSelectInputSource，
+        // 输入法进程内选择自身会导致激活握手弹跳（详见 main.swift 注释）
+        .executableTarget(
+            name: "LOSourceSwitcher",
+            path: "LOSourceSwitcher"
         )
     ]
 )

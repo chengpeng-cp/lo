@@ -203,9 +203,17 @@ class LOInputController: IMKInputController {
 
     // MARK: - 输入法生命周期
 
+    /// 读取客户端所属 App 的 bundle ID，用于诊断日志
+    private static func clientBundleID(_ client: Any?) -> String {
+        guard let c = client as? IMKTextInput else { return String(describing: client) }
+        return c.bundleIdentifier()
+    }
+
     /// 输入法被激活时调用
     override func activateServer(_ client: Any!) {
         super.activateServer(client)
+        let hadSession = currentSession != 0
+        debugLog("[DIAG] activateServer client=\(Self.clientBundleID(client)) 已有session=\(hadSession)")
 
         // 标记当前控制器为激活状态，供 CGEventTap 切输入法前提交预编辑文本。
         LOInputController.activeController = self
@@ -225,6 +233,9 @@ class LOInputController: IMKInputController {
         // 为当前客户端获取或创建 Rime 会话
         if let client = client {
             currentSession = sessionManager.sessionForClient(client)
+            debugLog("[DIAG] activateServer session=\(currentSession)")
+        } else {
+            debugLog("[DIAG] activateServer client=nil！")
         }
 
         // 根据用户设置的「默认输入模式」初始化 Rime ascii_mode
@@ -253,6 +264,7 @@ class LOInputController: IMKInputController {
 
     /// 输入法被停用时调用
     override func deactivateServer(_ client: Any!) {
+        debugLog("[DIAG] deactivateServer client=\(Self.clientBundleID(client)) session=\(currentSession)")
         // 如果切走前没有提交过预编辑文本，在这里做最后一次兜底提交。
         // deactivateServer 阶段部分客户端已不接受 insertText，因此尽量提前提交。
         commitRawPreedit(to: client as? IMKTextInput)
@@ -338,7 +350,8 @@ class LOInputController: IMKInputController {
     ///   - client: 输入法客户端
     /// - Returns: 是否已处理该按键
     override func handle(_ event: NSEvent!, client: Any!) -> Bool {
-        guard currentSession != 0, let event = event else { return false }
+        guard let event = event else { return false }
+        guard currentSession != 0 else { return false }
 
         if event.type == .flagsChanged {
             return handleFlagsChanged(event, client: client)
