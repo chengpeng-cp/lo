@@ -80,6 +80,13 @@ class TranslationScheduler {
     /// 翻译失败（原文, 错误信息）
     var onTranslationFailed: ((String, String) -> Void)?
 
+    /// 当前段落被删除后剩余原文（删除发生在段落末尾时触发），
+    /// 用于让悬浮窗立即清空与新原文不匹配的旧译文。
+    var onSegmentTrimmed: ((String) -> Void)?
+
+    /// 当前段落被全部删除（或删除长度不可知时直接丢弃段落）
+    var onSegmentCleared: (() -> Void)?
+
     // MARK: - 初始化
 
     nonisolated private init() {
@@ -153,6 +160,60 @@ class TranslationScheduler {
         onOriginalUpdate?(segmentToUpdate)
 
         // 重置短防抖与段落超时计时器
+        resetDebounceTimer()
+        resetSegmentTimeoutTimer()
+    }
+
+    /// 通知调度器用户在客户端删除了文本。
+    ///
+    /// 输入法只能看到按键、看不到客户端文档的真实变化，因此按「删除发生在段落末尾」处理：
+    /// 删除后重算当前段落，让后续翻译不再包含已删除的内容；删除到空段落时清空并通知隐藏悬浮窗。
+    /// - Parameter count: 删除的字符数（有选区时按选区长度），nil 表示删除长度不可知（丢弃整个段落）
+    func deleteBackward(count: Int?) {
+        guard isActive else { return }
+
+        invalidateTranslation()
+        lock.lock()
+
+        guard !currentSegment.isEmpty else {
+            lock.unlock()
+            return
+        }
+
+        let previous = currentSegment
+        if let count = count, count > 0 {
+            currentSegment = count < previous.count
+                ? String(previous.dropLast(count))
+                : ""
+        } else {
+            // 删除长度不可知（Cmd+Backspace、Cmd+Z、剪切等）：丢弃整段，避免继续翻译已不存在的内容
+            currentSegment = ""
+        }
+
+        let updated = currentSegment
+        let cleared = updated.isEmpty
+        if cleared {
+            lastCommitTime = Date.distantPast
+        } else {
+            lastCommitTime = Date()
+        }
+        lock.unlock()
+
+        guard cleared || updated != previous else { return }
+
+        if cleared {
+            debugLog("[Scheduler] 删除后段落清空")
+            debounceTimer?.invalidate()
+            debounceTimer = nil
+            segmentTimeoutTimer?.invalidate()
+            segmentTimeoutTimer = nil
+            onSegmentCleared?()
+            return
+        }
+
+        debugLog("[Scheduler] 删除同步，段落长度=\(updated.count)")
+        onSegmentTrimmed?(updated)
+        // 删除后重新起算防抖与段落超时，用户停止删除后再翻译新文本
         resetDebounceTimer()
         resetSegmentTimeoutTimer()
     }

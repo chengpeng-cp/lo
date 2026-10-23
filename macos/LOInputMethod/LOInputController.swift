@@ -151,6 +151,19 @@ class LOInputController: IMKInputController {
                 guard LOSettings.load().overlayEnabled else { return }
                 LOTranslationOverlay.shared.showError(originalText: original, error: error)
             }
+            // 用户删除了段落末尾的内容：立即清空已过期的译文，停止朗读旧内容
+            translationScheduler.onSegmentTrimmed = { text in
+                SpeechPlayer.shared.stop()
+                guard LOSettings.load().overlayEnabled,
+                      LOTranslationOverlay.shared.isVisible else { return }
+                LOTranslationOverlay.shared.showEditing(originalText: text)
+            }
+            // 段落被全部删除：悬浮窗没有可展示的内容，直接隐藏
+            translationScheduler.onSegmentCleared = {
+                SpeechPlayer.shared.stop()
+                guard LOSettings.load().overlayEnabled else { return }
+                LOTranslationOverlay.shared.hide()
+            }
         }
 
         // 监听设置变更：实时更新悬浮窗配置（位置模式、透明度、自动消失等）
@@ -346,6 +359,40 @@ class LOInputController: IMKInputController {
         range.location == NSNotFound ? "{NSNotFound,\(range.length)}" : "{\(range.location),\(range.length)}"
     }
 
+    /// 将客户端的删除操作同步给翻译调度器。
+    ///
+    /// 输入法只能看到按键、看不到客户端文档，因此按「删除发生在段落末尾」估算：
+    /// 普通退格删除 1 个字符；有选区时按选区长度删除；
+    /// 删除位置或长度无法确定（按词删除、前向删除）时丢弃整段，避免翻译已不存在的内容。
+    private func handleTextDeletion(event: NSEvent, client: Any?) {
+        let textInput = client as? IMKTextInput
+        let selection = textInput?.selectedRange() ?? NSRange(location: NSNotFound, length: 0)
+        let selectionLength = selection.location == NSNotFound ? 0 : selection.length
+
+        let count: Int?
+        if selectionLength > 0 {
+            // 删除的是选区内容，长度取选区长度（中文场景下 UTF-16 长度与字符数一致）
+            count = selectionLength
+        } else if event.keyCode == 117 || event.modifierFlags.contains(.option) {
+            count = nil
+        } else {
+            count = 1
+        }
+
+        debugLog("[Scheduler] 删除同步 count=\(count.map(String.init) ?? "整段丢弃") selection=\(selectionLength)")
+        Task { @MainActor in
+            TranslationScheduler.shared.deleteBackward(count: count)
+        }
+    }
+
+    /// 文本改动长度不可知时（剪切、撤销、按行删除）丢弃当前翻译段落
+    private func scheduleSegmentReset() {
+        debugLog("[Scheduler] 文本改动长度不可知，丢弃当前段落")
+        Task { @MainActor in
+            TranslationScheduler.shared.deleteBackward(count: nil)
+        }
+    }
+
     private func commitCurrentComposition(to textInput: IMKTextInput?) {
         guard currentSession != 0, let textInput = textInput else { return }
         if let text = rimeEngine.commitComposition(session: currentSession) {
@@ -419,6 +466,13 @@ class LOInputController: IMKInputController {
             if rimeEngine.isComposing(session: currentSession) {
                 commitCurrentComposition(to: client as? IMKTextInput)
             }
+            // 剪切 / 撤销 / 按行删除会改动客户端文本，但改动长度无法确定：
+            // 丢弃当前段落，避免继续翻译已被删除的内容
+            if event.keyCode == 51 || event.keyCode == 117 {
+                scheduleSegmentReset()
+            } else if let key = event.charactersIgnoringModifiers?.lowercased(), key == "x" || key == "z" {
+                scheduleSegmentReset()
+            }
             return false
         }
 
@@ -466,6 +520,13 @@ class LOInputController: IMKInputController {
 
         // 将按键交给 Rime 处理
         let handled = rimeEngine.processKey(keycode, modifiers: modifiers, session: currentSession)
+
+        // 删除键未被 Rime 消费时，由客户端执行删除：同步收缩翻译段落，
+        // 否则后续翻译仍会包含用户已经删掉的文字
+        if !handled, !rimeEngine.isComposing(session: currentSession),
+           event.keyCode == 51 || event.keyCode == 117 {
+            handleTextDeletion(event: event, client: client)
+        }
 
         // 通知翻译调度器用户正在输入：拼音组合期间没有 commit 事件产生，
         // 但用户并未停顿，应刷新段落超时基准，避免前面已 commit 的数字/字母被丢弃。

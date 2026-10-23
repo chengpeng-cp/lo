@@ -365,6 +365,17 @@ class LOTranslationOverlayView: NSView {
         originalLabel.stringValue = text
     }
 
+    /// 展示编辑态：更新原文并清空旧译文（原文被删除后旧译文不再匹配）
+    /// - Parameter originalText: 删除后剩余的原文
+    func showEditing(originalText: String) {
+        isLoading = false
+        hasValidTranslation = false
+        originalLabel.stringValue = originalText
+        setTranslationText("")
+        updateCopyButtonAppearance()
+        needsDisplay = true
+    }
+
     /// 仅更新翻译结果
     /// - Parameter text: 翻译结果文本
     func updateTranslation(_ text: String) {

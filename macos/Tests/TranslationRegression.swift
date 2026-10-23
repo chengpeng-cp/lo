@@ -75,6 +75,15 @@ final class DelayedTranslator: TranslationServiceProtocol {
     }
 }
 
+/// 记录调度器实际送翻的原文，用于验证删除后不会再把已删内容送去翻译
+final class RecordingTranslator: TranslationServiceProtocol {
+    private(set) var seen: [String] = []
+    func translate(text: String, targetLanguage: TargetLanguage) async throws -> String {
+        seen.append(text)
+        return "译文:\(text)"
+    }
+}
+
 extension TranslationScheduler {
     static func regressionInstance(_ service: TranslationServiceProtocol) -> TranslationScheduler {
         let scheduler = TranslationScheduler()
@@ -211,6 +220,45 @@ extension TranslationCache {
         check(callbacks == ["ready:仅原文"], "translation disabled still delivers original text to overlay and speech")
         LOSettings.value.translationEnabled = true
         scheduler.reset()
+
+        // 删除同步：段落尾部收缩后，只翻译剩余文本
+        LOSettings.value = LOSettings()
+        let recorder = RecordingTranslator()
+        let deleteScheduler = TranslationScheduler.regressionInstance(recorder)
+        var originals: [String] = []
+        var trimmed: [String] = []
+        var readyTexts: [String] = []
+        var clearedCount = 0
+        deleteScheduler.onOriginalUpdate = { originals.append($0) }
+        deleteScheduler.onSegmentTrimmed = { trimmed.append($0) }
+        deleteScheduler.onTranslationReady = { text, _ in readyTexts.append(text) }
+        deleteScheduler.onSegmentCleared = { clearedCount += 1 }
+        deleteScheduler.commit(text: "你好世")
+        deleteScheduler.commit(text: "界")
+        deleteScheduler.deleteBackward(count: 2)
+        check(trimmed.last == "你好", "delete trims the current segment tail immediately")
+        deleteScheduler.regressionFire()
+        try await Task.sleep(nanoseconds: 150_000_000)
+        check(readyTexts == ["你好"] && recorder.seen == ["你好"], "translation excludes deleted characters")
+        deleteScheduler.commit(text: "吗")
+        deleteScheduler.regressionFire()
+        try await Task.sleep(nanoseconds: 150_000_000)
+        check(recorder.seen.last == "你好吗" && readyTexts.last == "你好吗", "typing continues from the trimmed segment")
+
+        // 删除到空段落：清空并通知隐藏悬浮窗，且不再翻译旧内容
+        deleteScheduler.commit(text: "错误")
+        deleteScheduler.regressionFire()
+        deleteScheduler.deleteBackward(count: nil)
+        check(clearedCount == 1, "unknown-size deletion discards the whole segment")
+        try await Task.sleep(nanoseconds: 150_000_000)
+        check(!readyTexts.contains("错误"), "cleared segment suppresses the in-flight translation")
+        deleteScheduler.regressionFire()
+        try await Task.sleep(nanoseconds: 10_000_000)
+        check(!readyTexts.contains("错误"), "no translation is issued after the segment is cleared")
+
+        // 空段落上的退格不产生额外回调
+        deleteScheduler.deleteBackward(count: 1)
+        check(clearedCount == 1, "backspace on an empty segment is a no-op")
         print("\(checks) translation regression checks passed. All traffic used URLProtocol synthetic responses.")
     }
 }

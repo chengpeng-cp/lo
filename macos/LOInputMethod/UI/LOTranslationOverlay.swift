@@ -210,6 +210,15 @@ class LOTranslationOverlay {
         resizeAndShow()
     }
 
+    /// 展示「用户正在修改」状态：更新原文并清空已过期的译文
+    /// - Parameter originalText: 删除后剩余的原文
+    func showEditing(originalText: String) {
+        cancelDismissTimer()
+        lastTranslation = ""
+        overlayView.showEditing(originalText: originalText)
+        resizeAndShow()
+    }
+
     /// 更新翻译结果（结果到达时调用）
     /// - Parameter text: 翻译结果
     func updateTranslation(_ text: String) {
