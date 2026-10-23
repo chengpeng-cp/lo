@@ -3,10 +3,9 @@ import LOMTCore
 
 // MARK: - 模型目录
 //
-// 本地翻译分三个档位，模型都不随安装包分发：
-// - 轻量：OPUS-MT 按方向分发，首发只提供「中 → 英」，约 111 MB；
-// - 多语：M2M100-418M 一个包覆盖 100 种语言互译，约 630 MB；
-// - 高质量：Hy-MT2-1.8B（GGUF），当前只提供下载入口，推理随后续版本接入。
+// 轻量档按语言方向分发 OPUS-MT（ONNX INT8），模型都不随安装包分发。
+// 由于开放的中文直译模型有限，除「中 → 英」外的目标语言通过英语中转：
+// 中文 → English → 目标语言，因此需要中→英和英→目标两个语言包。
 
 enum MTModelCatalog {
 
@@ -19,24 +18,53 @@ enum MTModelCatalog {
         let targetName: String
         let xenovaRepo: String
         let helsinkiRepo: String
+        let verified: Bool
     }
 
-    // MARK: - 轻量档
+    // MARK: - 语言包
 
     static let packs: [Pack] = [
         Pack(id: "opus-mt-zh-en", source: "zh", target: "en",
              sourceName: "中文", targetName: "English",
-             xenovaRepo: "Xenova/opus-mt-zh-en", helsinkiRepo: "Helsinki-NLP/opus-mt-zh-en")
+             xenovaRepo: "Xenova/opus-mt-zh-en", helsinkiRepo: "Helsinki-NLP/opus-mt-zh-en",
+             verified: true),
+        Pack(id: "opus-mt-en-zh", source: "en", target: "zh",
+             sourceName: "English", targetName: "中文",
+             xenovaRepo: "Xenova/opus-mt-en-zh", helsinkiRepo: "Helsinki-NLP/opus-mt-en-zh",
+             verified: true),
+        Pack(id: "opus-mt-en-jap", source: "en", target: "ja",
+             sourceName: "English", targetName: "日本語",
+             xenovaRepo: "Xenova/opus-mt-en-jap", helsinkiRepo: "Helsinki-NLP/opus-mt-en-jap",
+             verified: false),
+        Pack(id: "opus-mt-en-fr", source: "en", target: "fr",
+             sourceName: "English", targetName: "Français",
+             xenovaRepo: "Xenova/opus-mt-en-fr", helsinkiRepo: "Helsinki-NLP/opus-mt-en-fr",
+             verified: false),
+        Pack(id: "opus-mt-en-de", source: "en", target: "de",
+             sourceName: "English", targetName: "Deutsch",
+             xenovaRepo: "Xenova/opus-mt-en-de", helsinkiRepo: "Helsinki-NLP/opus-mt-en-de",
+             verified: false),
+        Pack(id: "opus-mt-en-es", source: "en", target: "es",
+             sourceName: "English", targetName: "Español",
+             xenovaRepo: "Xenova/opus-mt-en-es", helsinkiRepo: "Helsinki-NLP/opus-mt-en-es",
+             verified: false),
+        Pack(id: "opus-mt-en-ru", source: "en", target: "ru",
+             sourceName: "English", targetName: "Русский",
+             xenovaRepo: "Xenova/opus-mt-en-ru", helsinkiRepo: "Helsinki-NLP/opus-mt-en-ru",
+             verified: false),
+        Pack(id: "opus-mt-en-ar", source: "en", target: "ar",
+             sourceName: "English", targetName: "العربية",
+             xenovaRepo: "Xenova/opus-mt-en-ar", helsinkiRepo: "Helsinki-NLP/opus-mt-en-ar",
+             verified: false)
     ]
 
-    /// 语言包估算体积（encoder + decoder + 分词资源）
-    static let estimatedBytes: Int64 = 115_970_953
+    /// 未校验语言包的估算体积
+    static let estimatedBytes: Int64 = 116_000_000
 
-    private static let encoderBytes: Int64 = 52_899_742
-    private static let decoderBytes: Int64 = 59_842_102
-
-    private static let verifiedSizes: [String: (vocab: Int64, source: Int64, target: Int64)] = [
-        "opus-mt-zh-en": (1_617_902, 804_677, 806_530)
+    private static let verifiedSizes: [String: (encoder: Int64, decoder: Int64,
+                                              vocab: Int64, source: Int64, target: Int64)] = [
+        "opus-mt-zh-en": (52_899_742, 59_842_102, 1_617_902, 804_677, 806_530),
+        "opus-mt-en-zh": (52_899_742, 59_842_102, 1_617_791, 806_435, 804_600)
     ]
 
     private static let verifiedHashes: [String: (encoder: String, decoder: String, vocab: String, source: String, target: String)] = [
@@ -45,7 +73,13 @@ enum MTModelCatalog {
             "debcc3054b9ff9aaed972bd6e251a459abe1e2f1402da1efa63163dc2f46ef73",
             "c0f79ee4c413ccb24cd808a0c727eec85b2130f23c82802cc1caeb07b5f0d458",
             "e27a3a1b539f4959ec72ea60e453f49156289f95d4e6000b29332efc45616203",
-            "6a881f4717cd7265f53fea54fd3dc689c767c05338fac7a4590f3088cb2d7855")
+            "6a881f4717cd7265f53fea54fd3dc689c767c05338fac7a4590f3088cb2d7855"),
+        "opus-mt-en-zh": (
+            "d3b7912bf6a9bd27e4c074c2df91d4ff3d5b4bc5f7f6c8d7cc9c805c98fbafee",
+            "2c66a3981099b40edbb3a0d65e015d05964d42fecb9780f8422776eff5939112",
+            "f1832ca38f7aa158b9a944ff583e4901e6b37d9d4ad9241f03838e636e9cfb03",
+            "5775ddc9e3ff2fae91554da56468ad35ff56edaba870fea74447bc7234bfdaa8",
+            "81dc94efa84e4025ef38d25d5d07429fe41e3eb29d44003f1db6fe98487b0052")
     ]
 
     private static func urls(_ repo: String, _ path: String) -> [String] {
@@ -55,18 +89,14 @@ enum MTModelCatalog {
         ]
     }
 
-    /// 生成一个语言包的 manifest
     static func manifest(for pack: Pack) -> MTModelManifest {
         let sizes = verifiedSizes[pack.id]
         let hashes = verifiedHashes[pack.id]
-        let total = sizes.map { encoderBytes + decoderBytes + $0.vocab + $0.source + $0.target }
+        let total = sizes.map { $0.encoder + $0.decoder + $0.vocab + $0.source + $0.target }
             ?? estimatedBytes
 
-        func file(_ name: String,
-                  bytes: Int64,
-                  hash: String?,
-                  repo: String,
-                  remotePath: String) -> MTModelFile {
+        func file(_ name: String, bytes: Int64, hash: String?,
+                  repo: String, remotePath: String) -> MTModelFile {
             MTModelFile(path: name, bytes: bytes, sha256: hash, urls: urls(repo, remotePath))
         }
 
@@ -87,10 +117,10 @@ enum MTModelCatalog {
             targetSpm: "target.spm",
             maxNewTokens: 256,
             files: [
-                file("encoder_model_quantized.onnx", bytes: encoderBytes,
+                file("encoder_model_quantized.onnx", bytes: sizes?.encoder ?? 0,
                      hash: hashes?.encoder, repo: pack.xenovaRepo,
                      remotePath: "onnx/encoder_model_quantized.onnx"),
-                file("decoder_model_quantized.onnx", bytes: decoderBytes,
+                file("decoder_model_quantized.onnx", bytes: sizes?.decoder ?? 0,
                      hash: hashes?.decoder, repo: pack.xenovaRepo,
                      remotePath: "onnx/decoder_model_quantized.onnx"),
                 file("vocab.json", bytes: sizes?.vocab ?? 0,
@@ -105,81 +135,39 @@ enum MTModelCatalog {
             ])
     }
 
-    /// 轻量档全部语言包（设置页展示）
     static let lightModels: [MTModelManifest] = packs.map(manifest(for:))
 
-    // MARK: - 多语档（M2M100-418M）
+    // MARK: - 目标语言与所需语言包
 
-    static let multiModelID = "m2m100-418m"
+    /// 轻量档支持的目标语言（与 `MTLanguageCatalog.lightCodes` 保持一致）
+    private static let lightRoutes: [String: [String]] = [
+        "en": ["opus-mt-zh-en"],
+        "zh": ["opus-mt-en-zh"],
+        "ja": ["opus-mt-zh-en", "opus-mt-en-jap"],
+        "fr": ["opus-mt-zh-en", "opus-mt-en-fr"],
+        "de": ["opus-mt-zh-en", "opus-mt-en-de"],
+        "es": ["opus-mt-zh-en", "opus-mt-en-es"],
+        "ru": ["opus-mt-zh-en", "opus-mt-en-ru"],
+        "ar": ["opus-mt-zh-en", "opus-mt-en-ar"]
+    ]
 
-    static let multiModel: MTModelManifest = {
-        let encoder: Int64 = 287_856_370
-        let decoder: Int64 = 339_181_945
-        let tokenizer: Int64 = 7_988_527
-        let repo = "Xenova/m2m100_418M"
-        return MTModelManifest(
-            id: multiModelID,
-            displayName: "多语翻译 · M2M100 418M",
-            tier: "multi",
-            engine: "onnx-m2m100",
-            src: "multi",
-            tgt: "multi",
-            bytes: encoder + decoder + tokenizer,
-            minRAMBytes: 8 * 1024 * 1024 * 1024,
-            licenseName: "MIT",
-            licenseURL: "https://huggingface.co/facebook/m2m100_418M",
-            attribution: "M2M100 · Meta AI，ONNX 量化版由 Xenova 提供",
-            encoder: "encoder_model_quantized.onnx",
-            decoder: "decoder_model_quantized.onnx",
-            vocab: "",
-            sourceSpm: "",
-            targetSpm: "",
-            tokenizer: "tokenizer.json",
-            maxNewTokens: 256,
-            files: [
-                MTModelFile(path: "encoder_model_quantized.onnx", bytes: encoder,
-                            sha256: "13a94e354a9140764eb81102d77d3ec6952d796e6f113c651eeb3c3443da0386",
-                            urls: urls(repo, "onnx/encoder_model_quantized.onnx")),
-                MTModelFile(path: "decoder_model_quantized.onnx", bytes: decoder,
-                            sha256: "6015e31c8976659aedb06058c4dadf0f400d087a3f9830f838e68f220d79bcb6",
-                            urls: urls(repo, "onnx/decoder_model_quantized.onnx")),
-                MTModelFile(path: "tokenizer.json", bytes: tokenizer,
-                            sha256: "03d9e111731c2d71f39a2c2a88499743e4c251385d07f0384b4349a23ba54363",
-                            urls: urls(repo, "tokenizer.json"))
-            ])
-    }()
+    /// 设置页展示：目标语言需要的语言包（按执行顺序）
+    static func packs(forTarget target: String) -> [MTModelManifest] {
+        let code = normalized(target)
+        let ids = lightRoutes[code] ?? []
+        return ids.compactMap { id in packs.first { $0.id == id } }.map(manifest(for:))
+    }
 
-    // MARK: - 高质量档（Hy-MT2-1.8B，仅下载）
-
-    static let qualityModelID = "hy-mt2-1.8b-q4"
-
-    static let qualityModel: MTModelManifest = {
-        let size: Int64 = 1_133_080_448
-        let repo = "tencent/Hy-MT2-1.8B-GGUF"
-        return MTModelManifest(
-            id: qualityModelID,
-            displayName: "高质量翻译 · Hy-MT2 1.8B",
-            tier: "quality",
-            engine: "gguf",
-            src: "multi",
-            tgt: "multi",
-            bytes: size,
-            minRAMBytes: 16 * 1024 * 1024 * 1024,
-            licenseName: "Apache-2.0",
-            licenseURL: "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF",
-            attribution: "Tencent Hunyuan Hy-MT2",
-            encoder: "",
-            decoder: "",
-            vocab: "",
-            sourceSpm: "",
-            targetSpm: "",
-            maxNewTokens: 256,
-            files: [
-                MTModelFile(path: "Hy-MT2-1.8B-Q4_K_M.gguf", bytes: size,
-                            sha256: "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699",
-                            urls: urls(repo, "Hy-MT2-1.8B-Q4_K_M.gguf"))
-            ])
-    }()
+    /// 运行时路由：优先直达，其次经英语中转；返回空表示不支持
+    static func route(forSource src: String, target: String) -> [MTModelManifest] {
+        if let direct = manifest(forSource: src, target: target) { return [direct] }
+        guard src != "en" else { return [] }
+        let code = normalized(target)
+        guard code != "en" else { return [] }
+        guard let first = manifest(forSource: src, target: "en"),
+              let second = manifest(forSource: "en", target: target) else { return [] }
+        return [first, second]
+    }
 
     // MARK: - 查询
 

@@ -225,23 +225,30 @@ struct InputCoreRegression {
         check(MTTextLanguage.source(for: "我们用 Swift 写代码") == "zh", "Mixed text with more CJK detected as Chinese")
         check(MTEngineMode.from("unknown") == .online, "Unknown engine mode falls back to online")
         check(MTEngineMode.from("localFirst") == .light, "Legacy local mode maps to light engine")
-        check(MTModelCatalog.lightModels.map { $0.id } == ["opus-mt-zh-en"],
-              "Light tier keeps only Chinese to English")
-        check(MTModelCatalog.multiModel.tier == "multi"
-              && MTModelCatalog.multiModel.engine == "onnx-m2m100",
-              "Multilingual tier uses M2M100 ONNX")
-        check(MTModelCatalog.qualityModel.engine == "gguf",
-              "Quality tier is a GGUF download")
-        check(MTModelCatalog.manifest(forSource: "en", target: "ja") == nil,
-              "Other directions are not part of the light tier")
+        check(MTModelCatalog.lightModels.count == 8,
+              "Light tier ships eight language packs")
+        check(MTModelCatalog.manifest(forSource: "en", target: "ja")?.id == "opus-mt-en-jap",
+              "English to Japanese pack is available")
+        check(MTModelCatalog.packs(forTarget: "ja").map { $0.id } == ["opus-mt-zh-en", "opus-mt-en-jap"],
+              "Japanese target needs Chinese to English plus English to Japanese")
+        check(MTModelCatalog.route(forSource: "zh", target: "ja").count == 2,
+              "Runtime routes Chinese to Japanese through English")
+        check(MTModelCatalog.route(forSource: "en", target: "ja").map { $0.id } == ["opus-mt-en-jap"],
+              "English to Japanese uses a single pack")
+        check(MTLanguageCatalog.lightCodes == ["en", "zh-Hans", "ja", "fr", "de", "es", "ru", "ar"],
+              "Light engine targets eight languages")
+        check(MTLanguageCatalog.normalizedCode("ceb") == "ceb",
+              "Three letter language codes are preserved")
+        check(!MTLanguageCatalog.supports("ko", mode: .light),
+              "Unsupported target is rejected for the light engine")
         check(MTModelCatalog.manifest(forSource: "zh", target: "en")?.id == "opus-mt-zh-en",
               "Catalog resolves zh to en")
-        check(MTModelCatalog.manifest(forSource: "en", target: "zh-Hans") == nil,
-              "Reverse direction is served by the multilingual pack")
+        check(MTModelCatalog.manifest(forSource: "en", target: "zh-Hans")?.id == "opus-mt-en-zh",
+              "Catalog normalizes zh-Hans to zh")
         check(MTModelCatalog.normalized("zh-Hans") == "zh",
               "Catalog normalizes zh-Hans to zh")
-        check(MTModelCatalog.manifest(forSource: "zh", target: "ja") == nil,
-              "Unsupported direction has no model")
+        check(MTModelCatalog.route(forSource: "zh", target: "ko").isEmpty,
+              "Unsupported direction has no route")
         check(MTErrorCode.timeout.isRetryable, "Timeout errors are retryable (fallback to online)")
         check(!MTErrorCode.modelNotFound.isRetryable, "Missing model errors are not retryable")
         print("Input core regression: \(passed) checks passed")

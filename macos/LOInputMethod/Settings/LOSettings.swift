@@ -18,7 +18,7 @@ struct LOSettings {
     /// 翻译目标语言（语言代码，如 en / ja / fr，见 TargetLanguage）
     var targetLanguage: String = "en"
 
-    /// 本地翻译引擎模式：online（在线）/ light（本地轻量）/ quality（本地高质量）
+    /// 本地翻译引擎模式：online（在线）/ light（本地轻量）
     var mtEngineMode: String = "online"
 
     /// 本地模型不可用时是否自动回退在线翻译

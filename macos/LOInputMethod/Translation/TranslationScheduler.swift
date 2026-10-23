@@ -283,7 +283,7 @@ class TranslationScheduler {
         let snapshot = settings
 
         // 获取当前目标语言
-        let targetLang = TargetLanguage(rawValue: snapshot.targetLanguage) ?? .english
+        let targetLang = TargetLanguage(rawValue: snapshot.targetLanguage)
 
         // 缓存以目标语言区分；当前只有免费的语境翻译一种引擎
         let cacheContext = "free"

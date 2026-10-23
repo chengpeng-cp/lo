@@ -81,7 +81,7 @@ class LOSettingsView: NSView {
     /// 悬浮窗显示开关
     private var overlayEnabledCheckbox: NSButton!
 
-    /// 翻译引擎下拉框（在线 / 本地轻量 / 本地高质量）
+    /// 翻译引擎下拉框（在线 / 本地轻量）
     private var mtEngineModePopup: NSPopUpButton!
 
     /// 引擎说明文字（随选择变化）
@@ -118,6 +118,12 @@ class LOSettingsView: NSView {
 
     /// 目标语言下拉框
     private var targetLanguagePopup: NSPopUpButton!
+
+    /// 目标语言可选项（语言代码，随当前引擎生成）
+    private var targetLanguageCodes: [String] = []
+
+    /// 目标语言能力说明（当前引擎支持多少种语言）
+    private var targetCapabilityLabel: NSTextField!
 
     /// 固定位置单选按钮
     private var fixedRadio: NSButton!
@@ -525,15 +531,15 @@ class LOSettingsView: NSView {
 
         appendSection("功能开关", rows: [makeFeatureToggleRows()], to: stack, isFirst: true)
 
-        appendSection("翻译服务", rows: [
-            makeDescriptionLabel("语境翻译（免费）：由微软 Edge 翻译提供，无需 API Key"),
-            makeTargetLanguageRow()
-        ], to: stack)
-
         appendSection("翻译引擎", rows: [
             makeEngineModeRow(),
             makeEngineDetailLabel(),
             makeFallbackRow()
+        ], to: stack)
+
+        appendSection("翻译语言", rows: [
+            makeTargetLanguageRow(),
+            makeTargetCapabilityLabel()
         ], to: stack)
 
         mtPackSectionViews = appendSection("本地模型", rows: makeLanguagePackRows(), to: stack)
@@ -993,13 +999,43 @@ class LOSettingsView: NSView {
         return row
     }
 
-    /// 构建目标语言下拉框行
+    /// 构建目标语言下拉框行（选项由当前引擎决定，见 rebuildTargetLanguageMenu）
     private func makeTargetLanguageRow() -> NSView {
         targetLanguagePopup = NSPopUpButton()
-        targetLanguagePopup.addItems(withTitles: TargetLanguage.allCases.map { $0.displayName })
         targetLanguagePopup.target = self
         targetLanguagePopup.action = #selector(targetLanguageChanged)
         return makeRow(label: "目标语言：", control: targetLanguagePopup)
+    }
+
+    private func makeTargetCapabilityLabel() -> NSView {
+        targetCapabilityLabel = NSTextField.loLabel("", font: LODesign.Font.caption,
+                                                    color: LODesign.Color.textSecondary)
+        targetCapabilityLabel.maximumNumberOfLines = 0
+        targetCapabilityLabel.lineBreakMode = .byWordWrapping
+        targetCapabilityLabel.cell?.wraps = true
+        return targetCapabilityLabel
+    }
+
+    /// 按引擎能力重建目标语言列表：不支持当前语言时自动切到默认值
+    private func rebuildTargetLanguageMenu(for mode: MTEngineMode) {
+        guard let popup = targetLanguagePopup else { return }
+        let codes = MTLanguageCatalog.codes(for: mode)
+        targetLanguageCodes = codes
+
+        popup.removeAllItems()
+        popup.addItems(withTitles: codes.map { MTLanguageCatalog.displayName(for: $0) })
+
+        let selected: String
+        if codes.contains(settings.targetLanguage) {
+            selected = settings.targetLanguage
+        } else {
+            selected = MTLanguageCatalog.defaultCode(for: mode)
+            settings.targetLanguage = selected
+            settings.save()
+        }
+        popup.selectItem(at: codes.firstIndex(of: selected) ?? 0)
+        popup.isEnabled = codes.count > 1
+        targetCapabilityLabel?.stringValue = MTLanguageCatalog.capabilityText(for: mode, count: codes.count)
     }
 
     // MARK: - 翻译引擎与本地模型
@@ -1047,17 +1083,13 @@ class LOSettingsView: NSView {
         return [mtPackSummaryLabel, mtPackListStack, mtPackHintLabel]
     }
 
-    /// 当前引擎档位对应的模型列表
+    /// 当前目标语言需要的语言包（按执行顺序，中→英 在前）
     private func manifestsForCurrentMode() -> [MTModelManifest] {
-        switch MTEngineMode.from(settings.mtEngineMode) {
-        case .online: return []
-        case .light: return MTModelCatalog.lightModels
-        case .multi: return [MTModelCatalog.multiModel]
-        case .quality: return [MTModelCatalog.qualityModel]
-        }
+        guard MTEngineMode.from(settings.mtEngineMode) == .light else { return [] }
+        return MTModelCatalog.packs(forTarget: settings.targetLanguage)
     }
 
-    /// 重建当前档位的模型列表：已安装 → 与当前目标语言相关 → 其余
+    /// 重建当前目标语言所需的语言包列表
     private func rebuildPackRows() {
         guard let stack = mtPackListStack else { return }
         for view in stack.arrangedSubviews {
@@ -1068,21 +1100,9 @@ class LOSettingsView: NSView {
 
         let store = MTModelStore.shared
         let manifests = manifestsForCurrentMode()
-        let target = MTModelCatalog.normalized(settings.targetLanguage)
-        let installed = manifests.filter { store.isInstalled($0.id) }
-        let installedIDs = Set(installed.map { $0.id })
-        let relevant = manifests.filter {
-            !installedIDs.contains($0.id) && MTModelCatalog.normalized($0.tgt) == target
-        }
-        let relevantIDs = Set(relevant.map { $0.id })
-        let rest = manifests.filter {
-            !installedIDs.contains($0.id) && !relevantIDs.contains($0.id)
-        }
-        let ordered = installed + relevant + rest
-
-        for manifest in ordered {
+        for manifest in manifests {
             let row = MTModelRowView(manifest: manifest,
-                                     labelWidth: ordered.count > 1 ? 150 : 190)
+                                     labelWidth: manifests.count > 1 ? 150 : 190)
             row.onDownload = { [weak self] in self?.startDownload(manifest) }
             row.onCancel = { [weak self] in self?.cancelDownload(manifest) }
             row.onDelete = { [weak self] in self?.deleteModel(manifest) }
@@ -1109,6 +1129,8 @@ class LOSettingsView: NSView {
         guard MTEngineMode.allCases.indices.contains(index) else { return }
         settings.mtEngineMode = MTEngineMode.allCases[index].rawValue
         MTEngineClient.shared.resetCircuitBreaker()
+        // 目标语言能力随引擎变化，先重建列表再刷新状态
+        rebuildTargetLanguageMenu(for: MTEngineMode.allCases[index])
         updateMTStatus()
         persistSettings()
     }
@@ -1137,7 +1159,10 @@ class LOSettingsView: NSView {
         }
 
         let fallback = settings.mtFallbackOnline
-        let target = MTModelCatalog.normalized(settings.targetLanguage)
+        let route = manifestsForCurrentMode()
+        let installed = route.filter { store.isInstalled($0.id) }
+        let missing = route.filter { !store.isInstalled($0.id) }
+        let usedBytes = installed.reduce(Int64(0)) { $0 + $1.bytes }
         let hint: String
 
         switch mode {
@@ -1145,43 +1170,28 @@ class LOSettingsView: NSView {
             return
 
         case .light:
-            let installed = MTModelCatalog.lightModels.filter { store.isInstalled($0.id) }
-            mtPackSummaryLabel?.stringValue = installed.isEmpty
-                ? "中 → 英语言包 · 约 \(Self.sizeText(MTModelCatalog.estimatedBytes))"
-                : "已安装 · 占用 \(Self.sizeText(installed.reduce(0) { $0 + $1.bytes }))"
-            let available = MTModelCatalog.packs.contains {
-                MTModelCatalog.normalized($0.target) == target
+            if route.isEmpty {
+                mtPackSummaryLabel?.stringValue = "当前目标语言不支持本地翻译"
+            } else if route.count == 1 {
+                mtPackSummaryLabel?.stringValue = installed.isEmpty
+                    ? "\(route[0].displayName) · 约 \(Self.sizeText(route[0].bytes))"
+                    : "已安装 · 占用 \(Self.sizeText(usedBytes))"
+            } else {
+                mtPackSummaryLabel?.stringValue = missing.isEmpty
+                    ? "已就绪 · 占用 \(Self.sizeText(usedBytes))（2 个语言包）"
+                    : "该方向需要 2 个语言包 · 已安装 \(installed.count)/2"
             }
-            let installedForTarget = MTModelCatalog.lightModels.contains {
-                store.isInstalled($0.id) && MTModelCatalog.normalized($0.tgt) == target
-            }
-            if !available {
+
+            if route.isEmpty {
                 hint = "当前目标语言暂不支持本地轻量翻译，\(fallback ? "将使用在线翻译" : "本地翻译会提示不支持")。"
-            } else if !installedForTarget {
-                hint = "下载「中文 → English」语言包后即可离线翻译；\(fallback ? "下载前暂用在线翻译" : "未下载时会提示缺少语言包")。"
+            } else if !missing.isEmpty {
+                let names = missing.map { $0.displayName }.joined(separator: "、")
+                hint = "还需要下载：\(names)。\(fallback ? "下载前暂用在线翻译。" : "未下载时会提示缺少语言包。")"
+            } else if route.count > 1 {
+                hint = "中文文本会先翻译为英文，再翻译为目标语言；两个语言包会同时驻留内存。"
             } else {
                 hint = ""
             }
-
-        case .multi:
-            let manifest = MTModelCatalog.multiModel
-            let installed = store.isInstalled(manifest.id)
-            mtPackSummaryLabel?.stringValue = installed
-                ? "已安装 · 占用 \(Self.sizeText(manifest.bytes))"
-                : "一个模型覆盖 100 种语言互译 · 约 \(Self.sizeText(manifest.bytes))"
-            hint = installed
-                ? ""
-                : "下载后可离线互译 100 种语言；\(fallback ? "下载前暂用在线翻译" : "未下载时会提示缺少模型")。"
-
-        case .quality:
-            let manifest = MTModelCatalog.qualityModel
-            let installed = store.isInstalled(manifest.id)
-            mtPackSummaryLabel?.stringValue = installed
-                ? "已下载 · 占用 \(Self.sizeText(manifest.bytes))"
-                : "需要 Apple Silicon 与 16 GB 内存 · 约 \(Self.sizeText(manifest.bytes))"
-            hint = installed
-                ? "模型已就绪，推理接入后会自动启用；在此之前\(fallback ? "使用在线翻译" : "会提示尚未支持")。"
-                : "推理正在接入：可先下载，后续版本启用；现在\(fallback ? "使用在线翻译" : "会提示尚未支持")。"
         }
 
         mtPackHintLabel?.stringValue = hint
@@ -1416,13 +1426,10 @@ class LOSettingsView: NSView {
         // 翻译开关
         translationEnabledCheckbox.state = settings.translationEnabled ? .on : .off
 
-        // 目标语言
-        let langIndex = TargetLanguage.allCases.firstIndex(where: { $0.rawValue == settings.targetLanguage }) ?? 0
-        targetLanguagePopup.selectItem(at: langIndex)
-
-        // 翻译引擎与本地模型
+        // 翻译引擎与本地模型（目标语言列表由引擎能力决定）
         let engineMode = MTEngineMode.from(settings.mtEngineMode)
         mtEngineModePopup?.selectItem(at: MTEngineMode.allCases.firstIndex(of: engineMode) ?? 0)
+        rebuildTargetLanguageMenu(for: engineMode)
         updateMTStatus()
 
         // 语音播报
@@ -1516,7 +1523,8 @@ class LOSettingsView: NSView {
 
     @objc private func targetLanguageChanged() {
         let idx = targetLanguagePopup.indexOfSelectedItem
-        settings.targetLanguage = TargetLanguage.allCases[idx].rawValue
+        guard targetLanguageCodes.indices.contains(idx) else { return }
+        settings.targetLanguage = targetLanguageCodes[idx]
         persistSettings()
         updateMTStatus()
     }

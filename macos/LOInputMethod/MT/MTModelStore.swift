@@ -87,11 +87,6 @@ final class MTModelStore {
         return nil
     }
 
-    /// 指定整包模型（多语 / 高质量）是否已安装
-    func installedPack(_ manifest: MTModelManifest) -> Bool {
-        isInstalled(manifest.id)
-    }
-
     func freeDiskSpace() -> Int64 {
         let values = try? rootDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         return values?.volumeAvailableCapacityForImportantUsage ?? 0

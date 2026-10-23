@@ -4,19 +4,15 @@ import LOMTCore
 
 // MARK: - 翻译引擎选项
 
-/// 设置页「翻译引擎」下拉框的四个选项
+/// 设置页「翻译引擎」下拉框的两个选项
 enum MTEngineMode: String, CaseIterable {
     case online
     case light
-    case multi
-    case quality
 
     var displayName: String {
         switch self {
         case .online: return "语境翻译（在线）"
-        case .light: return "本地翻译 · 轻量（中译英）"
-        case .multi: return "本地翻译 · 多语（418M）"
-        case .quality: return "本地翻译 · 高质量（1.8B）"
+        case .light: return "本地翻译 · 轻量"
         }
     }
 
@@ -25,20 +21,14 @@ enum MTEngineMode: String, CaseIterable {
         case .online:
             return "在线翻译由微软 Edge 提供，无需下载、联网即用；文本会发送到微软服务器。"
         case .light:
-            return "中 → 英语言包约 \(MTModelCatalog.sizeText(MTModelCatalog.lightModels[0].bytes))，离线可用、文本不出本机。"
-        case .multi:
-            return "M2M100 418M，一个模型覆盖 100 种语言互译，约 \(MTModelCatalog.sizeText(MTModelCatalog.multiModel.bytes))。"
-        case .quality:
-            return "Hy-MT2 1.8B，覆盖 33 种语言，约 \(MTModelCatalog.sizeText(MTModelCatalog.qualityModel.bytes))；推理正在接入，当前先提供下载。"
+            return "中 → 英约 111 MB；日/法/德/西/俄/阿经英语中转（中→英 + 英→目标）。"
         }
     }
 
-    /// 兼容旧版本的 local / localFirst 取值
+    /// 兼容旧版本取值（local / localFirst / multi / quality 统一回落到轻量档）
     static func from(_ raw: String) -> MTEngineMode {
         switch raw {
-        case "local", "localFirst", "light": return .light
-        case "multi", "m2m100": return .multi
-        case "quality": return .quality
+        case "local", "localFirst", "light", "multi", "quality": return .light
         default: return .online
         }
     }
@@ -93,47 +83,45 @@ enum LocalMTError: LocalizedError {
     case modelMissing(String)
     case unsupportedPair(String)
     case engine(String)
-    case qualityNotReady
 
     var errorDescription: String? {
         switch self {
         case .modelMissing(let detail): return "尚未下载该模型：\(detail)"
         case .unsupportedPair(let detail): return "本地翻译暂不支持该语言方向：\(detail)"
         case .engine(let detail): return detail
-        case .qualityNotReady: return "高质量档的推理正在接入，下载的模型将在后续版本启用"
         }
     }
 }
 
-/// 本地模型翻译器：轻量档按方向选包，多语档使用整包。
+/// 本地模型翻译器：优先直达语言包，必要时经英语中转。
 final class LocalMTTranslator: TranslationServiceProtocol {
 
     private let store = MTModelStore.shared
     private let client = MTEngineClient.shared
 
     func translate(text: String, targetLanguage: TargetLanguage) async throws -> String {
-        let mode = MTEngineMode.from(LOSettings.load().mtEngineMode)
-        let target = MTModelCatalog.normalized(targetLanguage.rawValue)
+        let source = MTModelCatalog.normalized(MTTextLanguage.source(for: text))
+        let target = MTModelCatalog.normalized(MTLanguageCatalog.normalizedCode(targetLanguage.rawValue))
 
-        if mode == .multi {
-            let manifest = MTModelCatalog.multiModel
-            guard store.installedPack(manifest) else {
-                throw LocalMTError.modelMissing("多语包（M2M100 418M）")
-            }
-            let source = MTTextLanguage.source(for: text)
-            if source == target { return text }
-            return try await run(manifest, text: text, source: source, target: target)
+        if source == target { return text }
+
+        let route = MTModelCatalog.route(forSource: source, target: target)
+        guard !route.isEmpty else {
+            throw LocalMTError.unsupportedPair("\(source)→\(target)")
         }
 
-        let source = MTTextLanguage.source(for: text)
-        guard let manifest = store.installedModel(forSource: source, target: target) else {
-            let pair = "\(source)→\(target)"
-            if MTModelCatalog.manifest(forSource: source, target: target) != nil {
-                throw LocalMTError.modelMissing(pair)
-            }
-            throw LocalMTError.unsupportedPair(pair)
+        let missing = route.filter { !store.isInstalled($0.id) }
+        if let first = missing.first {
+            throw LocalMTError.modelMissing(first.displayName)
         }
-        return try await run(manifest, text: text, source: source, target: target)
+
+        if route.count == 1 {
+            return try await run(route[0], text: text, source: source, target: target)
+        }
+
+        // 经英语中转：中文 → English → 目标语言
+        let middle = try await run(route[0], text: text, source: source, target: "en")
+        return try await run(route[1], text: middle, source: "en", target: target)
     }
 
     private func run(_ manifest: MTModelManifest,
@@ -145,7 +133,7 @@ final class LocalMTTranslator: TranslationServiceProtocol {
         if needsLoad {
             try await client.load(model: manifest.id, directory: directory)
         }
-        let timeout = needsLoad ? 8000 : 2000
+        let timeout = needsLoad ? 6000 : 1500
         do {
             return try await client.translate(text: text, source: source,
                                               target: target, timeoutMs: timeout)
@@ -171,14 +159,7 @@ final class HybridTranslator: TranslationServiceProtocol {
         case .online:
             return try await online.translate(text: text, targetLanguage: targetLanguage)
 
-        case .quality:
-            if settings.mtFallbackOnline {
-                debugLog("[MT] 高质量模型推理未就绪，回退在线")
-                return try await online.translate(text: text, targetLanguage: targetLanguage)
-            }
-            throw LocalMTError.qualityNotReady
-
-        case .light, .multi:
+        case .light:
             do {
                 let result = try await local.translate(text: text, targetLanguage: targetLanguage)
                 debugLog("[MT] 本地翻译完成 length=\(result.count)")
@@ -186,7 +167,9 @@ final class HybridTranslator: TranslationServiceProtocol {
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                guard settings.mtFallbackOnline else { throw error }
+                // 在线引擎不覆盖该语言时，回退也只会得到接口错误，直接给出本地提示
+                guard settings.mtFallbackOnline,
+                      MTLanguageCatalog.onlineCodes.contains(targetLanguage.rawValue) else { throw error }
                 debugLog("[MT] 本地不可用，回退在线：\(error.localizedDescription)")
                 return try await online.translate(text: text, targetLanguage: targetLanguage)
             }

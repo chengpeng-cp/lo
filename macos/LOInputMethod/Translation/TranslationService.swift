@@ -2,59 +2,54 @@ import Foundation
 
 // MARK: - 目标语言
 
-/// 翻译目标语言，rawValue 为 Bing/标准 BCP 47 语言代码
-enum TargetLanguage: String, CaseIterable {
-    case english = "en"
-    case englishUK = "en-GB"
-    case chineseSimplified = "zh-Hans"
-    case chineseTraditional = "zh-Hant"
-    case japanese = "ja"
-    case korean = "ko"
-    case french = "fr"
-    case german = "de"
-    case spanish = "es"
-    case italian = "it"
-    case portuguese = "pt"
-    case portugueseBR = "pt-BR"
-    case russian = "ru"
-    case arabic = "ar"
-    case hindi = "hi"
-    case thai = "th"
-    case vietnamese = "vi"
-    case indonesian = "id"
-    case dutch = "nl"
-    case polish = "pl"
-    case turkish = "tr"
-    case swedish = "sv"
-    case ukrainian = "uk"
+/// 翻译目标语言，rawValue 为语言代码（BCP 47 或 ISO 639）。
+/// 使用结构体而不是枚举，以便承载不同引擎的完整语言列表。
+struct TargetLanguage: RawRepresentable, Hashable, Sendable {
+    let rawValue: String
+
+    init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    init(_ code: String) {
+        self.rawValue = code
+    }
+
+    static let english = TargetLanguage("en")
+    static let englishUK = TargetLanguage("en-GB")
+    static let chineseSimplified = TargetLanguage("zh-Hans")
+    static let chineseTraditional = TargetLanguage("zh-Hant")
+    static let japanese = TargetLanguage("ja")
+    static let korean = TargetLanguage("ko")
+    static let french = TargetLanguage("fr")
+    static let german = TargetLanguage("de")
+    static let spanish = TargetLanguage("es")
+    static let italian = TargetLanguage("it")
+    static let portuguese = TargetLanguage("pt")
+    static let portugueseBR = TargetLanguage("pt-BR")
+    static let russian = TargetLanguage("ru")
+    static let arabic = TargetLanguage("ar")
+    static let hindi = TargetLanguage("hi")
+    static let thai = TargetLanguage("th")
+    static let vietnamese = TargetLanguage("vi")
+    static let indonesian = TargetLanguage("id")
+    static let dutch = TargetLanguage("nl")
+    static let polish = TargetLanguage("pl")
+    static let turkish = TargetLanguage("tr")
+    static let swedish = TargetLanguage("sv")
+    static let ukrainian = TargetLanguage("uk")
+
+    /// 在线引擎支持的语言（保留此列表供默认值使用）
+    static let allCases: [TargetLanguage] = [
+        .english, .englishUK, .chineseSimplified, .chineseTraditional, .japanese,
+        .korean, .french, .german, .spanish, .italian, .portuguese, .portugueseBR,
+        .russian, .arabic, .hindi, .thai, .vietnamese, .indonesian, .dutch,
+        .polish, .turkish, .swedish, .ukrainian
+    ]
 
     /// 下拉框显示名（母语名 + 中文名）
     var displayName: String {
-        switch self {
-        case .english:            return "English（英语）"
-        case .englishUK:          return "English (UK)（英语·英国）"
-        case .chineseSimplified:  return "简体中文"
-        case .chineseTraditional: return "繁體中文"
-        case .japanese:           return "日本語（日语）"
-        case .korean:             return "한국어（韩语）"
-        case .french:             return "Français（法语）"
-        case .german:             return "Deutsch（德语）"
-        case .spanish:            return "Español（西班牙语）"
-        case .italian:            return "Italiano（意大利语）"
-        case .portuguese:         return "Português（葡萄牙语）"
-        case .portugueseBR:       return "Português (BR)（葡萄牙语·巴西）"
-        case .russian:            return "Русский（俄语）"
-        case .arabic:             return "العربية（阿拉伯语）"
-        case .hindi:              return "हिन्दी（印地语）"
-        case .thai:               return "ภาษาไทย（泰语）"
-        case .vietnamese:         return "Tiếng Việt（越南语）"
-        case .indonesian:         return "Bahasa Indonesia（印尼语）"
-        case .dutch:              return "Nederlands（荷兰语）"
-        case .polish:             return "Polski（波兰语）"
-        case .turkish:            return "Türkçe（土耳其语）"
-        case .swedish:            return "Svenska（瑞典语）"
-        case .ukrainian:          return "Українська（乌克兰语）"
-        }
+        MTLanguageCatalog.displayName(for: rawValue)
     }
 }
 

@@ -75,7 +75,8 @@ final class MTEngineClient {
 
     func translate(text: String, source: String?, target: String,
                    timeoutMs: Int = 1500) async throws -> String {
-        let response = try await send(MTEngineRequest(id: 0, op: "translate",
+        let model = currentModelID
+        let response = try await send(MTEngineRequest(id: 0, op: "translate", model: model,
                                                      text: text, src: source, tgt: target,
                                                      timeoutMs: timeoutMs),
                                       timeoutMs: timeoutMs)
