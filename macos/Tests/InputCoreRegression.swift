@@ -225,15 +225,20 @@ struct InputCoreRegression {
         check(MTTextLanguage.source(for: "我们用 Swift 写代码") == "zh", "Mixed text with more CJK detected as Chinese")
         check(MTEngineMode.from("unknown") == .online, "Unknown engine mode falls back to online")
         check(MTEngineMode.from("localFirst") == .light, "Legacy local mode maps to light engine")
-        check(MTModelCatalog.lightModels.count == MTModelCatalog.packs.count,
-              "Catalog exposes every language pack")
-        check(MTModelCatalog.lightModels.prefix(2).map { $0.id } == ["opus-mt-zh-en", "opus-mt-en-zh"],
-              "Verified Chinese-English directions listed first")
-        check(MTModelCatalog.manifest(forSource: "en", target: "ja")?.id == "opus-mt-en-jap",
-              "English to Japanese pack is downloadable")
+        check(MTModelCatalog.lightModels.map { $0.id } == ["opus-mt-zh-en"],
+              "Light tier keeps only Chinese to English")
+        check(MTModelCatalog.multiModel.tier == "multi"
+              && MTModelCatalog.multiModel.engine == "onnx-m2m100",
+              "Multilingual tier uses M2M100 ONNX")
+        check(MTModelCatalog.qualityModel.engine == "gguf",
+              "Quality tier is a GGUF download")
+        check(MTModelCatalog.manifest(forSource: "en", target: "ja") == nil,
+              "Other directions are not part of the light tier")
         check(MTModelCatalog.manifest(forSource: "zh", target: "en")?.id == "opus-mt-zh-en",
               "Catalog resolves zh to en")
-        check(MTModelCatalog.manifest(forSource: "en", target: "zh-Hans")?.id == "opus-mt-en-zh",
+        check(MTModelCatalog.manifest(forSource: "en", target: "zh-Hans") == nil,
+              "Reverse direction is served by the multilingual pack")
+        check(MTModelCatalog.normalized("zh-Hans") == "zh",
               "Catalog normalizes zh-Hans to zh")
         check(MTModelCatalog.manifest(forSource: "zh", target: "ja") == nil,
               "Unsupported direction has no model")

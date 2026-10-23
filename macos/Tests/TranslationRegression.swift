@@ -26,10 +26,11 @@ struct LOSettings {
 // 测试总是直接注入 translator，因此替身不会被真正调用。
 
 enum MTEngineMode: String {
-    case online, light, quality
+    case online, light, multi, quality
     static func from(_ raw: String) -> MTEngineMode {
         switch raw {
         case "local", "localFirst", "light": return .light
+        case "multi", "m2m100": return .multi
         case "quality": return .quality
         default: return .online
         }

@@ -9,7 +9,7 @@ DEST="$ROOT_DIR/vendor/onnxruntime"
 ARCHIVE="onnxruntime-osx-universal2-$VERSION.tgz"
 URL="https://github.com/microsoft/onnxruntime/releases/download/v$VERSION/$ARCHIVE"
 
-if [ -f "$DEST/lib/libonnxruntime.dylib" ] && [ -d "$DEST/include/onnxruntime" ]; then
+if [ -f "$DEST/lib/libonnxruntime.dylib" ] && [ -f "$DEST/include/onnxruntime_cxx_api.h" ]; then
     echo "ONNX Runtime $VERSION 已存在：$DEST"
     exit 0
 fi

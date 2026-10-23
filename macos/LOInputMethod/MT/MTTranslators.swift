@@ -4,17 +4,19 @@ import LOMTCore
 
 // MARK: - 翻译引擎选项
 
-/// 设置页「翻译引擎」下拉框的三个选项
+/// 设置页「翻译引擎」下拉框的四个选项
 enum MTEngineMode: String, CaseIterable {
     case online
     case light
+    case multi
     case quality
 
     var displayName: String {
         switch self {
         case .online: return "语境翻译（在线）"
-        case .light: return "本地翻译 · 轻量"
-        case .quality: return "本地翻译 · 高质量（即将支持）"
+        case .light: return "本地翻译 · 轻量（中译英）"
+        case .multi: return "本地翻译 · 多语（418M）"
+        case .quality: return "本地翻译 · 高质量（1.8B）"
         }
     }
 
@@ -23,9 +25,11 @@ enum MTEngineMode: String, CaseIterable {
         case .online:
             return "在线翻译由微软 Edge 提供，无需下载、联网即用；文本会发送到微软服务器。"
         case .light:
-            return "每个语言包约 111 MB，离线可用、文本不出本机；按需要下载语言方向。"
+            return "中 → 英语言包约 \(MTModelCatalog.sizeText(MTModelCatalog.lightModels[0].bytes))，离线可用、文本不出本机。"
+        case .multi:
+            return "M2M100 418M，一个模型覆盖 100 种语言互译，约 \(MTModelCatalog.sizeText(MTModelCatalog.multiModel.bytes))。"
         case .quality:
-            return "1.8B 专用翻译模型，支持 33 种语言，正在适配，后续版本提供。"
+            return "Hy-MT2 1.8B，覆盖 33 种语言，约 \(MTModelCatalog.sizeText(MTModelCatalog.qualityModel.bytes))；推理正在接入，当前先提供下载。"
         }
     }
 
@@ -33,10 +37,14 @@ enum MTEngineMode: String, CaseIterable {
     static func from(_ raw: String) -> MTEngineMode {
         switch raw {
         case "local", "localFirst", "light": return .light
+        case "multi", "m2m100": return .multi
         case "quality": return .quality
         default: return .online
         }
     }
+
+    /// 是否使用本地模型
+    var isLocal: Bool { self != .online }
 }
 
 // MARK: - 语言判断
@@ -89,24 +97,35 @@ enum LocalMTError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .modelMissing(let detail): return "尚未下载该语言包：\(detail)"
+        case .modelMissing(let detail): return "尚未下载该模型：\(detail)"
         case .unsupportedPair(let detail): return "本地翻译暂不支持该语言方向：\(detail)"
         case .engine(let detail): return detail
-        case .qualityNotReady: return "高质量本地模型即将支持"
+        case .qualityNotReady: return "高质量档的推理正在接入，下载的模型将在后续版本启用"
         }
     }
 }
 
-/// 本地模型翻译器：按源语言自动选择对应语言包，必要时懒加载。
+/// 本地模型翻译器：轻量档按方向选包，多语档使用整包。
 final class LocalMTTranslator: TranslationServiceProtocol {
 
     private let store = MTModelStore.shared
     private let client = MTEngineClient.shared
 
     func translate(text: String, targetLanguage: TargetLanguage) async throws -> String {
-        let source = MTTextLanguage.source(for: text)
+        let mode = MTEngineMode.from(LOSettings.load().mtEngineMode)
         let target = MTModelCatalog.normalized(targetLanguage.rawValue)
 
+        if mode == .multi {
+            let manifest = MTModelCatalog.multiModel
+            guard store.installedPack(manifest) else {
+                throw LocalMTError.modelMissing("多语包（M2M100 418M）")
+            }
+            let source = MTTextLanguage.source(for: text)
+            if source == target { return text }
+            return try await run(manifest, text: text, source: source, target: target)
+        }
+
+        let source = MTTextLanguage.source(for: text)
         guard let manifest = store.installedModel(forSource: source, target: target) else {
             let pair = "\(source)→\(target)"
             if MTModelCatalog.manifest(forSource: source, target: target) != nil {
@@ -114,25 +133,25 @@ final class LocalMTTranslator: TranslationServiceProtocol {
             }
             throw LocalMTError.unsupportedPair(pair)
         }
+        return try await run(manifest, text: text, source: source, target: target)
+    }
 
+    private func run(_ manifest: MTModelManifest,
+                     text: String,
+                     source: String,
+                     target: String) async throws -> String {
         let directory = store.directory(for: manifest.id)
         let needsLoad = client.currentModelID != manifest.id
         if needsLoad {
             try await client.load(model: manifest.id, directory: directory)
         }
-        let timeout = needsLoad ? 6000 : 1500
+        let timeout = needsLoad ? 8000 : 2000
         do {
             return try await client.translate(text: text, source: source,
-                                              target: manifest.tgt, timeoutMs: timeout)
+                                              target: target, timeoutMs: timeout)
         } catch let error as MTEngineClient.ClientError {
             throw LocalMTError.engine(error.localizedDescription)
         }
-    }
-
-    /// 语言包是否覆盖指定目标语言（用于设置页提示）
-    static func covers(targetLanguage: TargetLanguage) -> Bool {
-        let target = MTModelCatalog.normalized(targetLanguage.rawValue)
-        return MTModelCatalog.packs.contains { MTModelCatalog.normalized($0.target) == target }
     }
 }
 
@@ -154,12 +173,12 @@ final class HybridTranslator: TranslationServiceProtocol {
 
         case .quality:
             if settings.mtFallbackOnline {
-                debugLog("[MT] 高质量模型未就绪，回退在线")
+                debugLog("[MT] 高质量模型推理未就绪，回退在线")
                 return try await online.translate(text: text, targetLanguage: targetLanguage)
             }
             throw LocalMTError.qualityNotReady
 
-        case .light:
+        case .light, .multi:
             do {
                 let result = try await local.translate(text: text, targetLanguage: targetLanguage)
                 debugLog("[MT] 本地翻译完成 length=\(result.count)")

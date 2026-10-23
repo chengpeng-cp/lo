@@ -56,9 +56,9 @@ public struct MTModelManifest: Codable, Sendable {
     public var schema: Int
     public var id: String
     public var displayName: String
-    /// light（轻量）或 quality（高质量）
+    /// light（轻量，按方向一个包）/ multi（多语，一包多方向）/ quality（高质量）
     public var tier: String
-    /// 目前只有 onnx
+    /// onnx（OPUS-MT，Marian）/ onnx-m2m100（M2M100）/ gguf（仅提供下载）
     public var engine: String
     public var src: String
     public var tgt: String
@@ -75,6 +75,8 @@ public struct MTModelManifest: Codable, Sendable {
     public var vocab: String
     public var sourceSpm: String
     public var targetSpm: String
+    /// BPE 分词文件（M2M100 等非 OPUS-MT 模型使用）；nil 表示走 SentencePiece + vocab.json
+    public var tokenizer: String?
     public var maxNewTokens: Int
     public var files: [MTModelFile]
 
@@ -96,6 +98,7 @@ public struct MTModelManifest: Codable, Sendable {
                 vocab: String,
                 sourceSpm: String,
                 targetSpm: String,
+                tokenizer: String? = nil,
                 maxNewTokens: Int = 256,
                 files: [MTModelFile]) {
         self.schema = schema
@@ -116,6 +119,7 @@ public struct MTModelManifest: Codable, Sendable {
         self.vocab = vocab
         self.sourceSpm = sourceSpm
         self.targetSpm = targetSpm
+        self.tokenizer = tokenizer
         self.maxNewTokens = maxNewTokens
         self.files = files
     }

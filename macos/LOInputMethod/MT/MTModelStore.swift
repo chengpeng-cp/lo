@@ -77,7 +77,7 @@ final class MTModelStore {
         try? fileManager.removeItem(at: dir)
     }
 
-    /// 查找覆盖指定方向、且已安装的模型
+    /// 查找覆盖指定方向、且已安装的轻量模型
     func installedModel(forSource src: String, target: String) -> MTModelManifest? {
         let wanted = MTModelCatalog.normalized(target)
         for spec in MTModelCatalog.lightModels
@@ -85,6 +85,11 @@ final class MTModelStore {
             return spec
         }
         return nil
+    }
+
+    /// 指定整包模型（多语 / 高质量）是否已安装
+    func installedPack(_ manifest: MTModelManifest) -> Bool {
+        isInstalled(manifest.id)
     }
 
     func freeDiskSpace() -> Int64 {
