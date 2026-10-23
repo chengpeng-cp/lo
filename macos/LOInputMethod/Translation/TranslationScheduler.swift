@@ -177,8 +177,9 @@ class TranslationScheduler {
         let settings = LOSettings.load()
         translator = HybridTranslator()
         MTEngineClient.shared.idleUnloadMinutes = settings.mtIdleUnloadMinutes
-        // 仅在线/本地优先模式需要预热网络端点；纯本地模式不发任何请求
-        if MTEngineMode.from(settings.mtEngineMode) != .local {
+        // 在线模式与允许回退时需要预热网络端点；纯本地模式不发任何请求
+        let mode = MTEngineMode.from(settings.mtEngineMode)
+        if mode == .online || settings.mtFallbackOnline {
             if let url = URL(string: "https://edge.microsoft.com/translate/translatetext") {
                 TranslationNetwork.warmup(url: url)
             }

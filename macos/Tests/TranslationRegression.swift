@@ -14,6 +14,7 @@ struct LOSettings {
     var speechEnabled = false
     var targetLanguage = "en"
     var mtEngineMode = "online"
+    var mtFallbackOnline = true
     var mtIdleUnloadMinutes = 10.0
     var segmentPauseThreshold = 3600.0
     var translationDebounceInterval = 3600.0
@@ -25,8 +26,14 @@ struct LOSettings {
 // 测试总是直接注入 translator，因此替身不会被真正调用。
 
 enum MTEngineMode: String {
-    case online, localFirst, local
-    static func from(_ raw: String) -> MTEngineMode { MTEngineMode(rawValue: raw) ?? .online }
+    case online, light, quality
+    static func from(_ raw: String) -> MTEngineMode {
+        switch raw {
+        case "local", "localFirst", "light": return .light
+        case "quality": return .quality
+        default: return .online
+        }
+    }
 }
 
 final class HybridTranslator: TranslationServiceProtocol {

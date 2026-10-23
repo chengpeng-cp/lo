@@ -18,8 +18,11 @@ struct LOSettings {
     /// 翻译目标语言（语言代码，如 en / ja / fr，见 TargetLanguage）
     var targetLanguage: String = "en"
 
-    /// 本地翻译引擎模式：online（仅在线）/ localFirst（本地优先，失败回退）/ local（仅本地）
+    /// 本地翻译引擎模式：online（在线）/ light（本地轻量）/ quality（本地高质量）
     var mtEngineMode: String = "online"
+
+    /// 本地模型不可用时是否自动回退在线翻译
+    var mtFallbackOnline: Bool = true
 
     /// 本地推理进程空闲多久后卸载模型权重（分钟）
     var mtIdleUnloadMinutes: Double = 10
@@ -132,6 +135,7 @@ struct LOSettings {
         static let translationEnabled = "LO_translationEnabled"
         static let targetLanguage = "LO_targetLanguage"
         static let mtEngineMode = "LO_mtEngineMode"
+        static let mtFallbackOnline = "LO_mtFallbackOnline"
         static let mtIdleUnloadMinutes = "LO_mtIdleUnloadMinutes"
         static let overlayPositionMode = "LO_overlayPositionMode"
         static let overlayFixedPositionLegacy = "LO_overlayFixedPosition"
@@ -172,6 +176,12 @@ struct LOSettings {
         }
         settings.targetLanguage = defaults.string(forKey: Keys.targetLanguage) ?? "en"
         settings.mtEngineMode = defaults.string(forKey: Keys.mtEngineMode) ?? "online"
+        if defaults.object(forKey: Keys.mtFallbackOnline) != nil {
+            settings.mtFallbackOnline = defaults.bool(forKey: Keys.mtFallbackOnline)
+        } else if settings.mtEngineMode == "local" {
+            // 旧版「仅本地」迁移为不回退
+            settings.mtFallbackOnline = false
+        }
         settings.mtIdleUnloadMinutes = defaults.double(forKey: Keys.mtIdleUnloadMinutes)
         if settings.mtIdleUnloadMinutes == 0 { settings.mtIdleUnloadMinutes = 10 }
         debugLog("[Settings] 加载设置: targetLanguage=\(settings.targetLanguage)")
@@ -233,6 +243,7 @@ struct LOSettings {
         defaults.set(translationEnabled, forKey: Keys.translationEnabled)
         defaults.set(targetLanguage, forKey: Keys.targetLanguage)
         defaults.set(mtEngineMode, forKey: Keys.mtEngineMode)
+        defaults.set(mtFallbackOnline, forKey: Keys.mtFallbackOnline)
         defaults.set(mtIdleUnloadMinutes, forKey: Keys.mtIdleUnloadMinutes)
         defaults.set(overlayPositionMode, forKey: Keys.overlayPositionMode)
         defaults.set(Double(overlayPosition.x), forKey: Keys.overlayPositionX)

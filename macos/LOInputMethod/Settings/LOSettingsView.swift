@@ -81,16 +81,28 @@ class LOSettingsView: NSView {
     /// 悬浮窗显示开关
     private var overlayEnabledCheckbox: NSButton!
 
-    /// 翻译引擎模式下拉框（在线 / 本地优先 / 仅本地）
+    /// 翻译引擎下拉框（在线 / 本地轻量 / 本地高质量）
     private var mtEngineModePopup: NSPopUpButton!
 
-    /// 引擎模式说明文字（随选择变化）
+    /// 引擎说明文字（随选择变化）
     private var mtEngineDetailLabel: NSTextField!
 
-    /// 本地模型状态提示（未安装 / 已安装但未启用等）
-    private var mtModelHintLabel: NSTextField!
+    /// 本地不可用时是否回退在线
+    private var mtFallbackCheckbox: NSButton!
 
-    /// 本地模型行（按 manifest id 索引）
+    /// 语言包概况（已安装数量、占用体积）
+    private var mtPackSummaryLabel: NSTextField!
+
+    /// 语言包列表容器（按安装状态动态重建）
+    private var mtPackListStack: NSStackView!
+
+    /// 语言包提示（未覆盖当前目标语言等）
+    private var mtPackHintLabel: NSTextField!
+
+    /// 「语言包」整个区块的视图（仅本地轻量模式显示）
+    private var mtPackSectionViews: [NSView] = []
+
+    /// 语言包行（按 manifest id 索引）
     private var mtModelRows: [String: MTModelRowView] = [:]
 
     /// 正在下载的模型 id，避免重复触发
@@ -520,10 +532,11 @@ class LOSettingsView: NSView {
 
         appendSection("翻译引擎", rows: [
             makeEngineModeRow(),
-            makeEngineDetailLabel()
+            makeEngineDetailLabel(),
+            makeFallbackRow()
         ], to: stack)
 
-        appendSection("本地模型", rows: makeLocalModelRows(), to: stack)
+        mtPackSectionViews = appendSection("语言包", rows: makeLanguagePackRows(), to: stack)
 
         appendSection("语音播报", rows: [
             makeDescriptionLabel("使用系统语音离线朗读，无需额外配置；关闭翻译时朗读原文"),
@@ -846,17 +859,32 @@ class LOSettingsView: NSView {
     }
 
     /// 把「区块标题 + 卡片」组装好，直接加进页面 stack
-    private func appendSection(_ title: String, rows: [NSView], to stack: NSStackView, isFirst: Bool = false) {
+    /// - Returns: 该区块的所有视图，便于按条件整体显示/隐藏
+    @discardableResult
+    private func appendSection(_ title: String, rows: [NSView], to stack: NSStackView, isFirst: Bool = false) -> [NSView] {
+        var views: [NSView] = []
         if !isFirst {
-            stack.addArrangedSubview(spacer(LODesign.Metric.cardGap))
+            let gap = spacer(LODesign.Metric.cardGap)
+            stack.addArrangedSubview(gap)
+            views.append(gap)
         }
-        stack.addArrangedSubview(makeSectionHeader(title))
-        stack.addArrangedSubview(spacer(6))
+        let header = makeSectionHeader(title)
+        stack.addArrangedSubview(header)
+        views.append(header)
+        let sub = spacer(6)
+        stack.addArrangedSubview(sub)
+        views.append(sub)
 
         // 卡片撑满内容宽度，各分组左右边界保持对齐
         let card = makeCard(rows)
         stack.addArrangedSubview(card)
         card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        views.append(card)
+        return views
+    }
+
+    private func setSectionViews(_ views: [NSView], visible: Bool) {
+        views.forEach { $0.isHidden = !visible }
     }
 
     // MARK: - UI 辅助
@@ -979,9 +1007,11 @@ class LOSettingsView: NSView {
     private func makeEngineModeRow() -> NSView {
         mtEngineModePopup = NSPopUpButton()
         mtEngineModePopup.addItems(withTitles: MTEngineMode.allCases.map { $0.displayName })
+        // 高质量档尚未提供，先禁用避免用户选中后无模型可用
+        mtEngineModePopup.item(at: MTEngineMode.allCases.firstIndex(of: .quality) ?? 2)?.isEnabled = false
         mtEngineModePopup.target = self
         mtEngineModePopup.action = #selector(mtEngineModeChanged)
-        return makeRow(label: "引擎模式：", control: mtEngineModePopup)
+        return makeRow(label: "翻译引擎：", control: mtEngineModePopup)
     }
 
     private func makeEngineDetailLabel() -> NSView {
@@ -993,27 +1023,76 @@ class LOSettingsView: NSView {
         return mtEngineDetailLabel
     }
 
-    private func makeLocalModelRows() -> [NSView] {
-        var rows: [NSView] = [
-            makeDescriptionLabel("模型不随安装包分发，按需下载；离线翻译时文本不出本机。")
-        ]
-        for manifest in MTModelCatalog.lightModels {
-            let row = MTModelRowView(manifest: manifest)
+    private func makeFallbackRow() -> NSView {
+        mtFallbackCheckbox = NSButton(checkboxWithTitle: "本地模型不可用时自动使用在线翻译",
+                                      target: self, action: #selector(mtFallbackChanged))
+        mtFallbackCheckbox.font = NSFont.systemFont(ofSize: 13)
+        return mtFallbackCheckbox
+    }
+
+    private func makeLanguagePackRows() -> [NSView] {
+        mtPackSummaryLabel = NSTextField.loLabel("", font: LODesign.Font.caption,
+                                                 color: LODesign.Color.textSecondary)
+
+        mtPackListStack = NSStackView()
+        mtPackListStack.orientation = .vertical
+        mtPackListStack.alignment = .leading
+        mtPackListStack.spacing = LODesign.Metric.rowGap
+        mtPackListStack.translatesAutoresizingMaskIntoConstraints = false
+
+        mtPackHintLabel = NSTextField.loLabel("", font: LODesign.Font.caption,
+                                              color: LODesign.Color.textSecondary)
+        mtPackHintLabel.maximumNumberOfLines = 0
+        mtPackHintLabel.lineBreakMode = .byWordWrapping
+        mtPackHintLabel.cell?.wraps = true
+
+        return [mtPackSummaryLabel, mtPackListStack, mtPackHintLabel]
+    }
+
+    /// 重建语言包列表：已安装 → 与当前目标语言相关 → 其余
+    private func rebuildPackRows() {
+        guard let stack = mtPackListStack else { return }
+        for view in stack.arrangedSubviews {
+            stack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        mtModelRows.removeAll()
+
+        let store = MTModelStore.shared
+        let manifests = MTModelCatalog.lightModels
+        let target = MTModelCatalog.normalized(settings.targetLanguage)
+        let installed = manifests.filter { store.isInstalled($0.id) }
+        let installedIDs = Set(installed.map { $0.id })
+        let relevant = manifests.filter {
+            !installedIDs.contains($0.id) && MTModelCatalog.normalized($0.tgt) == target
+        }
+        let relevantIDs = Set(relevant.map { $0.id })
+        let rest = manifests.filter {
+            !installedIDs.contains($0.id) && !relevantIDs.contains($0.id)
+        }
+        let ordered = installed + relevant + rest
+
+        for manifest in ordered {
+            let row = MTModelRowView(manifest: manifest, labelWidth: 150)
             row.onDownload = { [weak self] in self?.startDownload(manifest) }
             row.onCancel = { [weak self] in self?.cancelDownload(manifest) }
             row.onDelete = { [weak self] in self?.deleteModel(manifest) }
             mtModelRows[manifest.id] = row
-            rows.append(row)
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            if store.isInstalled(manifest.id) {
+                row.apply(.installed(bytes: manifest.bytes))
+            } else {
+                row.apply(.notInstalled)
+            }
         }
-        rows.append(makeDescriptionLabel("高质量翻译（1.8B）正在适配 Apple Silicon，后续版本提供。"))
+    }
 
-        mtModelHintLabel = NSTextField.loLabel("", font: LODesign.Font.caption,
-                                               color: LODesign.Color.textSecondary)
-        mtModelHintLabel.maximumNumberOfLines = 0
-        mtModelHintLabel.lineBreakMode = .byWordWrapping
-        mtModelHintLabel.cell?.wraps = true
-        rows.append(mtModelHintLabel)
-        return rows
+    private func applyPackStates() {
+        let store = MTModelStore.shared
+        for (id, row) in mtModelRows where !mtDownloading.contains(id) {
+            row.apply(store.isInstalled(id) ? .installed(bytes: row.manifest.bytes) : .notInstalled)
+        }
     }
 
     @objc private func mtEngineModeChanged() {
@@ -1025,34 +1104,58 @@ class LOSettingsView: NSView {
         persistSettings()
     }
 
-    /// 刷新引擎说明与本地模型状态
+    @objc private func mtFallbackChanged() {
+        settings.mtFallbackOnline = (mtFallbackCheckbox.state == .on)
+        persistSettings()
+        updateMTStatus()
+    }
+
+    /// 刷新引擎说明、语言包区块与安装状态
     private func updateMTStatus() {
         let mode = MTEngineMode.from(settings.mtEngineMode)
         mtEngineDetailLabel?.stringValue = mode.detail
+        mtFallbackCheckbox?.state = settings.mtFallbackOnline ? .on : .off
+        mtFallbackCheckbox?.isHidden = mode == .online
+
+        let usesLocal = mode == .light
+        setSectionViews(mtPackSectionViews, visible: usesLocal)
+        guard usesLocal else { return }
 
         let store = MTModelStore.shared
-        for (id, row) in mtModelRows where !mtDownloading.contains(id) {
-            if store.isInstalled(id) {
-                row.apply(.installed(bytes: row.manifest.bytes))
-            } else {
-                row.apply(.notInstalled)
-            }
+        if mtDownloading.isEmpty {
+            rebuildPackRows()
+        } else {
+            applyPackStates()
         }
 
         let installed = MTModelCatalog.lightModels.filter { store.isInstalled($0.id) }
+        let usedBytes = installed.reduce(Int64(0)) { $0 + $1.bytes }
+        mtPackSummaryLabel?.stringValue = installed.isEmpty
+            ? "尚未安装语言包 · 共 \(MTModelCatalog.lightModels.count) 个可选"
+            : "已安装 \(installed.count) 个 · 占用 \(Self.sizeText(usedBytes))"
+
+        let target = MTModelCatalog.normalized(settings.targetLanguage)
+        let available = MTModelCatalog.packs.contains { MTModelCatalog.normalized($0.target) == target }
+        let installedForTarget = MTModelCatalog.lightModels.contains {
+            store.isInstalled($0.id) && MTModelCatalog.normalized($0.tgt) == target
+        }
         let hint: String
-        switch (mode, installed.isEmpty) {
-        case (.local, true):
-            hint = "仅本地模式需要先下载模型；当前没有可用模型，翻译会直接提示失败。"
-        case (.localFirst, true):
-            hint = "尚未下载本地模型，当前使用在线翻译。"
-        case (.online, false):
-            hint = "本地模型已就绪，但引擎模式为在线；切换为「本地优先」即可离线翻译。"
-        default:
+        if !available {
+            hint = "当前目标语言暂无本地语言包，\(settings.mtFallbackOnline ? "将使用在线翻译" : "本地翻译会提示不支持")。"
+        } else if !installedForTarget {
+            hint = "当前目标语言的语言包尚未安装，\(settings.mtFallbackOnline ? "暂用在线翻译" : "本地翻译会提示缺少语言包")。"
+        } else if installed.isEmpty {
+            hint = "还没有安装任何语言包，点击下方「下载」即可离线翻译。"
+        } else {
             hint = ""
         }
-        mtModelHintLabel?.stringValue = hint
-        mtModelHintLabel?.textColor = hint.isEmpty ? LODesign.Color.textSecondary : .systemOrange
+        mtPackHintLabel?.stringValue = hint
+        mtPackHintLabel?.textColor = hint.isEmpty ? LODesign.Color.textSecondary : .systemOrange
+    }
+
+    private static func sizeText(_ bytes: Int64) -> String {
+        let mb = Double(bytes) / 1_048_576
+        return mb >= 1000 ? String(format: "%.2f GB", mb / 1024) : String(format: "%.0f MB", mb)
     }
 
     private func startDownload(_ manifest: MTModelManifest) {
@@ -1381,6 +1484,7 @@ class LOSettingsView: NSView {
         let idx = targetLanguagePopup.indexOfSelectedItem
         settings.targetLanguage = TargetLanguage.allCases[idx].rawValue
         persistSettings()
+        updateMTStatus()
     }
 
     @objc private func positionModeChanged() {

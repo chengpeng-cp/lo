@@ -77,12 +77,14 @@ final class MTDownloader {
         try FileManager.default.createDirectory(at: partialDirectory, withIntermediateDirectories: true)
 
         var completed: Int64 = 0
-        let total = manifest.bytes
+        // 未提供校验信息的文件大小未知，按已知文件之和计算进度
+        let knownBytes = manifest.files.reduce(Int64(0)) { $0 + max(0, $1.bytes) }
+        let total = knownBytes > 0 ? knownBytes : manifest.bytes
 
         for file in manifest.files {
             let target = destination.appendingPathComponent(file.path)
             if (try? verify(target, sha256: file.sha256, size: file.bytes)) != nil {
-                completed += file.bytes
+                completed += file.bytes > 0 ? file.bytes : 0
                 report(progress, completed, total)
                 continue
             }
@@ -103,7 +105,7 @@ final class MTDownloader {
                         try FileManager.default.removeItem(at: target)
                     }
                     try FileManager.default.moveItem(at: partial, to: target)
-                    completed += file.bytes
+                    completed += max(0, file.bytes)
                     self.report(progress, completed, total)
                     succeeded = true
                     break
@@ -174,12 +176,18 @@ final class MTDownloader {
 
     // MARK: - 校验
 
-    private func verify(_ url: URL, sha256: String, size: Int64) throws {
+    private func verify(_ url: URL, sha256: String?, size: Int64) throws {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         let actualSize = (attributes[.size] as? Int64) ?? 0
-        guard actualSize == size else {
+        guard actualSize > 1024 else {
             throw DownloadError.checksumMismatch(url.lastPathComponent)
         }
+        if size > 0 && actualSize != size {
+            throw DownloadError.checksumMismatch(url.lastPathComponent)
+        }
+        // 部分语言包未提供官方摘要：依赖 HTTPS 与后续模型加载校验
+        guard let sha256, !sha256.isEmpty else { return }
+
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var hasher = SHA256()

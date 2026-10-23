@@ -25,7 +25,7 @@ final class MTModelRowView: NSView {
     private let actionButton: NSButton
     private var state: State = .notInstalled
 
-    init(manifest: MTModelManifest) {
+    init(manifest: MTModelManifest, labelWidth: CGFloat = LODesign.Metric.labelWidth) {
         self.manifest = manifest
         titleLabel = NSTextField.loLabel(manifest.displayName,
                                          font: LODesign.Font.row,
@@ -38,7 +38,7 @@ final class MTModelRowView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         titleLabel.setContentHuggingPriority(.required, for: .horizontal)
         titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        titleLabel.widthAnchor.constraint(equalToConstant: LODesign.Metric.labelWidth).isActive = true
+        titleLabel.widthAnchor.constraint(equalToConstant: labelWidth).isActive = true
 
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)

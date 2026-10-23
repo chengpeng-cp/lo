@@ -37,11 +37,13 @@ public enum MTErrorCode: String, Codable, Sendable {
 /// 模型包中的单个文件（下载与校验单位）
 public struct MTModelFile: Codable, Sendable {
     public var path: String
+    /// 期望字节数；0 表示未知（不校验大小）
     public var bytes: Int64
-    public var sha256: String
+    /// SHA-256；nil 表示该来源未提供（仅依赖 HTTPS 与模型加载校验）
+    public var sha256: String?
     public var urls: [String]
 
-    public init(path: String, bytes: Int64, sha256: String, urls: [String]) {
+    public init(path: String, bytes: Int64, sha256: String?, urls: [String]) {
         self.path = path
         self.bytes = bytes
         self.sha256 = sha256

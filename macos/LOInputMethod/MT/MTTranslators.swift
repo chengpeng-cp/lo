@@ -1,34 +1,41 @@
 import Foundation
+import NaturalLanguage
 import LOMTCore
 
-// MARK: - 引擎模式
+// MARK: - 翻译引擎选项
 
+/// 设置页「翻译引擎」下拉框的三个选项
 enum MTEngineMode: String, CaseIterable {
     case online
-    case localFirst
-    case local
+    case light
+    case quality
 
     var displayName: String {
         switch self {
-        case .online: return "在线"
-        case .localFirst: return "本地优先"
-        case .local: return "仅本地"
+        case .online: return "语境翻译（在线）"
+        case .light: return "本地翻译 · 轻量"
+        case .quality: return "本地翻译 · 高质量（即将支持）"
         }
     }
 
     var detail: String {
         switch self {
         case .online:
-            return "始终使用免费的在线翻译，不下载任何模型"
-        case .localFirst:
-            return "优先本地模型；未安装、不支持或超时则自动联网"
-        case .local:
-            return "只使用本地模型；未安装或语言不支持时直接提示，不联网"
+            return "在线翻译由微软 Edge 提供，无需下载、联网即用；文本会发送到微软服务器。"
+        case .light:
+            return "每个语言包约 111 MB，离线可用、文本不出本机；按需要下载语言方向。"
+        case .quality:
+            return "1.8B 专用翻译模型，支持 33 种语言，正在适配，后续版本提供。"
         }
     }
 
+    /// 兼容旧版本的 local / localFirst 取值
     static func from(_ raw: String) -> MTEngineMode {
-        MTEngineMode(rawValue: raw) ?? .online
+        switch raw {
+        case "local", "localFirst", "light": return .light
+        case "quality": return .quality
+        default: return .online
+        }
     }
 }
 
@@ -36,25 +43,39 @@ enum MTEngineMode: String, CaseIterable {
 
 enum MTTextLanguage {
 
-    /// 粗略判断源语言：包含一定比例的 CJK 字符即视为中文
+    /// 判断源语言：优先使用系统语言识别，短文本用 CJK 比例兜底
     static func source(for text: String) -> String {
-        let scalars = text.unicodeScalars
-        guard !scalars.isEmpty else { return "zh" }
-        var cjk = 0
-        var latin = 0
-        for scalar in scalars {
-            switch scalar.value {
-            case 0x4E00...0x9FFF, 0x3400...0x4DBF, 0xF900...0xFAFF:
-                cjk += 1
-            case 0x41...0x5A, 0x61...0x7A:
-                latin += 1
-            default:
-                break
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "zh" }
+
+        let cjkCount = trimmed.unicodeScalars.filter { scalar in
+            (0x4E00...0x9FFF).contains(scalar.value)
+                || (0x3400...0x4DBF).contains(scalar.value)
+                || (0x3040...0x30FF).contains(scalar.value)
+        }.count
+
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(trimmed)
+        let dominant = recognizer.dominantLanguage?.rawValue
+
+        // 日文含假名，优先判为日文；纯汉字且识别置信度低时按中文处理
+        if let dominant {
+            switch dominant {
+            case "ja": return "ja"
+            case "ko": return "ko"
+            case "zh-Hans", "zh-Hant", "zh": return "zh"
+            case "ar": return "ar"
+            case "ru": return "ru"
+            case "fr": return "fr"
+            case "de": return "de"
+            case "es": return "es"
+            case "en": return "en"
+            default: break
             }
         }
-        if cjk == 0 { return "en" }
-        if latin == 0 { return "zh" }
-        return cjk >= latin ? "zh" : "en"
+
+        if cjkCount > 0 { return "zh" }
+        return "en"
     }
 }
 
@@ -64,17 +85,19 @@ enum LocalMTError: LocalizedError {
     case modelMissing(String)
     case unsupportedPair(String)
     case engine(String)
+    case qualityNotReady
 
     var errorDescription: String? {
         switch self {
-        case .modelMissing(let detail): return "本地模型未安装：\(detail)"
-        case .unsupportedPair(let detail): return "本地模型不支持该语言方向：\(detail)"
+        case .modelMissing(let detail): return "尚未下载该语言包：\(detail)"
+        case .unsupportedPair(let detail): return "本地翻译暂不支持该语言方向：\(detail)"
         case .engine(let detail): return detail
+        case .qualityNotReady: return "高质量本地模型即将支持"
         }
     }
 }
 
-/// 本地模型翻译器：按源语言自动选择中→英或英→中模型，必要时懒加载。
+/// 本地模型翻译器：按源语言自动选择对应语言包，必要时懒加载。
 final class LocalMTTranslator: TranslationServiceProtocol {
 
     private let store = MTModelStore.shared
@@ -97,7 +120,6 @@ final class LocalMTTranslator: TranslationServiceProtocol {
         if needsLoad {
             try await client.load(model: manifest.id, directory: directory)
         }
-        // 首次加载模型需要更宽的预算
         let timeout = needsLoad ? 6000 : 1500
         do {
             return try await client.translate(text: text, source: source,
@@ -106,24 +128,38 @@ final class LocalMTTranslator: TranslationServiceProtocol {
             throw LocalMTError.engine(error.localizedDescription)
         }
     }
+
+    /// 语言包是否覆盖指定目标语言（用于设置页提示）
+    static func covers(targetLanguage: TargetLanguage) -> Bool {
+        let target = MTModelCatalog.normalized(targetLanguage.rawValue)
+        return MTModelCatalog.packs.contains { MTModelCatalog.normalized($0.target) == target }
+    }
 }
 
 // MARK: - 在线/本地混合
 
-/// 按设置里的引擎模式选择后端，并执行回退策略。
+/// 按设置里的引擎选项选择后端，并按开关决定是否回退在线。
 final class HybridTranslator: TranslationServiceProtocol {
 
     private let online = BingTranslator()
     private let local = LocalMTTranslator()
 
     func translate(text: String, targetLanguage: TargetLanguage) async throws -> String {
-        let mode = MTEngineMode.from(LOSettings.load().mtEngineMode)
+        let settings = LOSettings.load()
+        let mode = MTEngineMode.from(settings.mtEngineMode)
+
         switch mode {
         case .online:
             return try await online.translate(text: text, targetLanguage: targetLanguage)
-        case .local:
-            return try await local.translate(text: text, targetLanguage: targetLanguage)
-        case .localFirst:
+
+        case .quality:
+            if settings.mtFallbackOnline {
+                debugLog("[MT] 高质量模型未就绪，回退在线")
+                return try await online.translate(text: text, targetLanguage: targetLanguage)
+            }
+            throw LocalMTError.qualityNotReady
+
+        case .light:
             do {
                 let result = try await local.translate(text: text, targetLanguage: targetLanguage)
                 debugLog("[MT] 本地翻译完成 length=\(result.count)")
@@ -131,7 +167,8 @@ final class HybridTranslator: TranslationServiceProtocol {
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                debugLog("[MT] 本地翻译不可用，回退在线：\(error.localizedDescription)")
+                guard settings.mtFallbackOnline else { throw error }
+                debugLog("[MT] 本地不可用，回退在线：\(error.localizedDescription)")
                 return try await online.translate(text: text, targetLanguage: targetLanguage)
             }
         }
