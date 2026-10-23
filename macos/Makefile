@@ -12,17 +12,21 @@ SYSTEM_BUNDLE_PATH := $(SYSTEM_INSTALL_DIR)/$(APP_NAME).app
 # lsregister 完整路径（用于 LaunchServices 注册/注销，防止输入法列表重复）
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
 
-.PHONY: build install install-full clean uninstall uninstall-clean restart fetch-dict install-dict clean-trash package package-uninstaller
+.PHONY: build install install-full clean uninstall uninstall-clean restart fetch-dict fetch-ort install-dict clean-trash package package-uninstaller
 
 ## 下载 rime-ice 社区词库到源码 Resources/rime/cn_dicts/
 fetch-dict:
 	@bash scripts/fetch-dict.sh
 
+## 下载本地翻译所需的 ONNX Runtime（不随仓库分发）
+fetch-ort:
+	@bash scripts/fetch-onnxruntime.sh
+
 ## 更新词库会改变已签名资源；重组并验证完整应用后再替换。
 install-dict: install-full
 
 ## 构建 release 版本
-build:
+build: fetch-ort
 	swift build -c release -Xswiftc -strict-concurrency=minimal
 
 ## 构建、下载与签名完成后再替换安装，避免构建失败删除可用版本。

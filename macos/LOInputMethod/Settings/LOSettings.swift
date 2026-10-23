@@ -18,6 +18,12 @@ struct LOSettings {
     /// 翻译目标语言（语言代码，如 en / ja / fr，见 TargetLanguage）
     var targetLanguage: String = "en"
 
+    /// 本地翻译引擎模式：online（仅在线）/ localFirst（本地优先，失败回退）/ local（仅本地）
+    var mtEngineMode: String = "online"
+
+    /// 本地推理进程空闲多久后卸载模型权重（分钟）
+    var mtIdleUnloadMinutes: Double = 10
+
     /// 悬浮窗位置模式：fixed（固定屏幕右侧）/ draggable（可自由拖动）/ followCursor（跟随光标）
     var overlayPositionMode: String = "draggable"
 
@@ -125,6 +131,8 @@ struct LOSettings {
     private enum Keys {
         static let translationEnabled = "LO_translationEnabled"
         static let targetLanguage = "LO_targetLanguage"
+        static let mtEngineMode = "LO_mtEngineMode"
+        static let mtIdleUnloadMinutes = "LO_mtIdleUnloadMinutes"
         static let overlayPositionMode = "LO_overlayPositionMode"
         static let overlayFixedPositionLegacy = "LO_overlayFixedPosition"
         static let overlayPositionX = "LO_overlayPositionX"
@@ -163,6 +171,9 @@ struct LOSettings {
             settings.translationEnabled = defaults.bool(forKey: Keys.translationEnabled)
         }
         settings.targetLanguage = defaults.string(forKey: Keys.targetLanguage) ?? "en"
+        settings.mtEngineMode = defaults.string(forKey: Keys.mtEngineMode) ?? "online"
+        settings.mtIdleUnloadMinutes = defaults.double(forKey: Keys.mtIdleUnloadMinutes)
+        if settings.mtIdleUnloadMinutes == 0 { settings.mtIdleUnloadMinutes = 10 }
         debugLog("[Settings] 加载设置: targetLanguage=\(settings.targetLanguage)")
         // 位置模式：优先读新键，不存在则从旧键迁移
         if let mode = defaults.string(forKey: Keys.overlayPositionMode) {
@@ -221,6 +232,8 @@ struct LOSettings {
 
         defaults.set(translationEnabled, forKey: Keys.translationEnabled)
         defaults.set(targetLanguage, forKey: Keys.targetLanguage)
+        defaults.set(mtEngineMode, forKey: Keys.mtEngineMode)
+        defaults.set(mtIdleUnloadMinutes, forKey: Keys.mtIdleUnloadMinutes)
         defaults.set(overlayPositionMode, forKey: Keys.overlayPositionMode)
         defaults.set(Double(overlayPosition.x), forKey: Keys.overlayPositionX)
         defaults.set(Double(overlayPosition.y), forKey: Keys.overlayPositionY)

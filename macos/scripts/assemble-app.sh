@@ -11,6 +11,18 @@ cp "$ROOT_DIR/.build/release/LOSourceSwitcher" "$DEST/Contents/MacOS/"
 cp "$ROOT_DIR/LOInputMethod/Info.plist" "$DEST/Contents/"
 cp -R "$ROOT_DIR/LOInputMethod/Resources/." "$DEST/Contents/Resources/"
 INSTALL_DIR="$DEST" bash "$ROOT_DIR/scripts/build-librime.sh"
+
+# 本地翻译：helper 进程 + 精简后的 ONNX Runtime 动态库
+if [ ! -f "$ROOT_DIR/vendor/onnxruntime/lib/libonnxruntime.dylib" ]; then
+    bash "$ROOT_DIR/scripts/fetch-onnxruntime.sh"
+fi
+cp "$ROOT_DIR/.build/release/LOMTEngine" "$DEST/Contents/MacOS/"
+mkdir -p "$DEST/Contents/Frameworks"
+APP_ARCH="$(lipo -archs "$DEST/Contents/MacOS/LOInputMethod" | awk '{print $1}')"
+ORT_LIB="$ROOT_DIR/vendor/onnxruntime/lib/libonnxruntime.1.20.1.dylib"
+lipo -thin "$APP_ARCH" "$ORT_LIB" -output "$DEST/Contents/Frameworks/libonnxruntime.1.20.1.dylib"
+ln -sf libonnxruntime.1.20.1.dylib "$DEST/Contents/Frameworks/libonnxruntime.dylib"
+strip -x "$DEST/Contents/Frameworks/libonnxruntime.1.20.1.dylib" 2>/dev/null || true
 # Homebrew bottles may require a newer OS than the Swift deployment target.
 MIN_OS="$(otool -l "$DEST/Contents/MacOS/LOInputMethod" "$DEST/Contents/Frameworks/"*.dylib | awk '$1 == "minos" {split($2, p, "."); n=p[1]*10000+p[2]*100+p[3]; if(n>max){max=n; version=$2}} END {print version}')"
 if [ -n "$MIN_OS" ]; then

@@ -37,6 +37,8 @@ echo "=========================================="
 echo ""
 echo "[1/7] 构建输入法二进制..."
 cd "$ROOT_DIR"
+# 本地翻译依赖 ONNX Runtime；不随仓库分发，构建前按需下载
+bash scripts/fetch-onnxruntime.sh
 # -Xswiftc -strict-concurrency=minimal : 禁用 Swift 严格并发检查
 # 避免 @MainActor 类在 Timer/Task 闭包中捕获 self 的并发警告升级为错误
 # （CI 的 Xcode 15.4 默认启用严格并发检查,即使 -swift-version 5 也不够）

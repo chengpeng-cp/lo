@@ -12,7 +12,8 @@ class TranslationScheduler {
     nonisolated static let shared = TranslationScheduler()
 
     /// 翻译服务实例（延迟初始化，确保在主线程上创建）
-    private lazy var translator: TranslationServiceProtocol = BingTranslator()
+    /// 具体走在线还是本地由 HybridTranslator 按设置中的引擎模式决定
+    private lazy var translator: TranslationServiceProtocol = HybridTranslator()
 
     /// 翻译缓存
     private let cache = TranslationCache.shared
@@ -173,9 +174,15 @@ class TranslationScheduler {
     /// 更新翻译服务（设置变更后调用，重建翻译器并预热连接）
     func updateTranslator() {
         invalidateTranslation()
-        translator = BingTranslator()
-        // 预热连接：提前与翻译端点建立 TCP+TLS，后续请求可复用，减少首次翻译握手延迟
-        TranslationNetwork.warmup(url: URL(string: "https://edge.microsoft.com/translate/translatetext")!)
+        let settings = LOSettings.load()
+        translator = HybridTranslator()
+        MTEngineClient.shared.idleUnloadMinutes = settings.mtIdleUnloadMinutes
+        // 仅在线/本地优先模式需要预热网络端点；纯本地模式不发任何请求
+        if MTEngineMode.from(settings.mtEngineMode) != .local {
+            if let url = URL(string: "https://edge.microsoft.com/translate/translatetext") {
+                TranslationNetwork.warmup(url: url)
+            }
+        }
     }
 
     // MARK: - 文本过滤

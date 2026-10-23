@@ -1,4 +1,5 @@
 import AppKit
+import LOMTCore
 
 // MARK: - 通知
 
@@ -79,6 +80,21 @@ class LOSettingsView: NSView {
 
     /// 悬浮窗显示开关
     private var overlayEnabledCheckbox: NSButton!
+
+    /// 翻译引擎模式下拉框（在线 / 本地优先 / 仅本地）
+    private var mtEngineModePopup: NSPopUpButton!
+
+    /// 引擎模式说明文字（随选择变化）
+    private var mtEngineDetailLabel: NSTextField!
+
+    /// 本地模型状态提示（未安装 / 已安装但未启用等）
+    private var mtModelHintLabel: NSTextField!
+
+    /// 本地模型行（按 manifest id 索引）
+    private var mtModelRows: [String: MTModelRowView] = [:]
+
+    /// 正在下载的模型 id，避免重复触发
+    private var mtDownloading: Set<String> = []
 
     /// 语音播报语速下拉框
     private var speechRatePopup: NSPopUpButton!
@@ -501,6 +517,13 @@ class LOSettingsView: NSView {
             makeDescriptionLabel("语境翻译（免费）：由微软 Edge 翻译提供，无需 API Key"),
             makeTargetLanguageRow()
         ], to: stack)
+
+        appendSection("翻译引擎", rows: [
+            makeEngineModeRow(),
+            makeEngineDetailLabel()
+        ], to: stack)
+
+        appendSection("本地模型", rows: makeLocalModelRows(), to: stack)
 
         appendSection("语音播报", rows: [
             makeDescriptionLabel("使用系统语音离线朗读，无需额外配置；关闭翻译时朗读原文"),
@@ -951,6 +974,135 @@ class LOSettingsView: NSView {
         return makeRow(label: "目标语言：", control: targetLanguagePopup)
     }
 
+    // MARK: - 翻译引擎与本地模型
+
+    private func makeEngineModeRow() -> NSView {
+        mtEngineModePopup = NSPopUpButton()
+        mtEngineModePopup.addItems(withTitles: MTEngineMode.allCases.map { $0.displayName })
+        mtEngineModePopup.target = self
+        mtEngineModePopup.action = #selector(mtEngineModeChanged)
+        return makeRow(label: "引擎模式：", control: mtEngineModePopup)
+    }
+
+    private func makeEngineDetailLabel() -> NSView {
+        mtEngineDetailLabel = NSTextField.loLabel("", font: LODesign.Font.caption,
+                                                  color: LODesign.Color.textSecondary)
+        mtEngineDetailLabel.maximumNumberOfLines = 0
+        mtEngineDetailLabel.lineBreakMode = .byWordWrapping
+        mtEngineDetailLabel.cell?.wraps = true
+        return mtEngineDetailLabel
+    }
+
+    private func makeLocalModelRows() -> [NSView] {
+        var rows: [NSView] = [
+            makeDescriptionLabel("模型不随安装包分发，按需下载；离线翻译时文本不出本机。")
+        ]
+        for manifest in MTModelCatalog.lightModels {
+            let row = MTModelRowView(manifest: manifest)
+            row.onDownload = { [weak self] in self?.startDownload(manifest) }
+            row.onCancel = { [weak self] in self?.cancelDownload(manifest) }
+            row.onDelete = { [weak self] in self?.deleteModel(manifest) }
+            mtModelRows[manifest.id] = row
+            rows.append(row)
+        }
+        rows.append(makeDescriptionLabel("高质量翻译（1.8B）正在适配 Apple Silicon，后续版本提供。"))
+
+        mtModelHintLabel = NSTextField.loLabel("", font: LODesign.Font.caption,
+                                               color: LODesign.Color.textSecondary)
+        mtModelHintLabel.maximumNumberOfLines = 0
+        mtModelHintLabel.lineBreakMode = .byWordWrapping
+        mtModelHintLabel.cell?.wraps = true
+        rows.append(mtModelHintLabel)
+        return rows
+    }
+
+    @objc private func mtEngineModeChanged() {
+        let index = mtEngineModePopup.indexOfSelectedItem
+        guard MTEngineMode.allCases.indices.contains(index) else { return }
+        settings.mtEngineMode = MTEngineMode.allCases[index].rawValue
+        MTEngineClient.shared.resetCircuitBreaker()
+        updateMTStatus()
+        persistSettings()
+    }
+
+    /// 刷新引擎说明与本地模型状态
+    private func updateMTStatus() {
+        let mode = MTEngineMode.from(settings.mtEngineMode)
+        mtEngineDetailLabel?.stringValue = mode.detail
+
+        let store = MTModelStore.shared
+        for (id, row) in mtModelRows where !mtDownloading.contains(id) {
+            if store.isInstalled(id) {
+                row.apply(.installed(bytes: row.manifest.bytes))
+            } else {
+                row.apply(.notInstalled)
+            }
+        }
+
+        let installed = MTModelCatalog.lightModels.filter { store.isInstalled($0.id) }
+        let hint: String
+        switch (mode, installed.isEmpty) {
+        case (.local, true):
+            hint = "仅本地模式需要先下载模型；当前没有可用模型，翻译会直接提示失败。"
+        case (.localFirst, true):
+            hint = "尚未下载本地模型，当前使用在线翻译。"
+        case (.online, false):
+            hint = "本地模型已就绪，但引擎模式为在线；切换为「本地优先」即可离线翻译。"
+        default:
+            hint = ""
+        }
+        mtModelHintLabel?.stringValue = hint
+        mtModelHintLabel?.textColor = hint.isEmpty ? LODesign.Color.textSecondary : .systemOrange
+    }
+
+    private func startDownload(_ manifest: MTModelManifest) {
+        guard !mtDownloading.contains(manifest.id) else { return }
+        mtDownloading.insert(manifest.id)
+        mtModelRows[manifest.id]?.apply(.downloading(done: 0, total: manifest.bytes))
+
+        Task { @MainActor in
+            do {
+                try await MTDownloader.shared.download(manifest) { [weak self] done, total in
+                    self?.mtModelRows[manifest.id]?.apply(.downloading(done: done, total: total))
+                }
+                mtDownloading.remove(manifest.id)
+                MTEngineClient.shared.resetCircuitBreaker()
+                updateMTStatus()
+                debugLog("[MT] 模型安装完成 \(manifest.id)")
+            } catch {
+                mtDownloading.remove(manifest.id)
+                if case MTDownloader.DownloadError.cancelled = error {
+                    mtModelRows[manifest.id]?.apply(.notInstalled)
+                } else {
+                    mtModelRows[manifest.id]?.apply(.failed(error.localizedDescription))
+                }
+                debugLog("[MT] 模型下载失败 \(manifest.id)：\(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func cancelDownload(_ manifest: MTModelManifest) {
+        MTDownloader.shared.cancel()
+        mtDownloading.remove(manifest.id)
+        MTModelStore.shared.discardPartial(manifest.id)
+        updateMTStatus()
+    }
+
+    private func deleteModel(_ manifest: MTModelManifest) {
+        let alert = NSAlert()
+        alert.messageText = "删除本地模型？"
+        alert.informativeText = "删除后该方向将回退到在线翻译，需要时可重新下载（\(manifest.displayName)）。"
+        alert.addButton(withTitle: "删除")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        try? MTModelStore.shared.delete(manifest.id)
+        if MTEngineClient.shared.currentModelID == manifest.id {
+            Task { await MTEngineClient.shared.unload() }
+        }
+        updateMTStatus()
+    }
+
     private func makePositionModeRow() -> NSView {
         fixedRadio = NSButton(radioButtonWithTitle: "固定位置", target: self, action: #selector(positionModeChanged))
         movableRadio = NSButton(radioButtonWithTitle: "可自由拖动", target: self, action: #selector(positionModeChanged))
@@ -1130,6 +1282,11 @@ class LOSettingsView: NSView {
         // 目标语言
         let langIndex = TargetLanguage.allCases.firstIndex(where: { $0.rawValue == settings.targetLanguage }) ?? 0
         targetLanguagePopup.selectItem(at: langIndex)
+
+        // 翻译引擎与本地模型
+        let engineMode = MTEngineMode.from(settings.mtEngineMode)
+        mtEngineModePopup?.selectItem(at: MTEngineMode.allCases.firstIndex(of: engineMode) ?? 0)
+        updateMTStatus()
 
         // 语音播报
         speechEnabledCheckbox.state = settings.speechEnabled ? .on : .off

@@ -3,6 +3,7 @@ macos/.build/
 macos/.swiftpm/
 macos/Package.resolved
 macos/dist/
+macos/vendor/
 
 # ===== rime 词库（按需下载，不入库）=====
 macos/LOInputMethod/Resources/rime/cn_dicts/

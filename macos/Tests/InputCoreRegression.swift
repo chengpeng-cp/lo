@@ -3,6 +3,7 @@
 import AppKit
 import InputMethodKit
 import CRime
+import LOMTCore
 
 private final class MockInputClient: NSObject, IMKTextInput {
     var text = ""
@@ -217,6 +218,22 @@ struct InputCoreRegression {
         check(RimeEngine.convertKeyCode(117) == 0xFFFF, "Forward Delete is mapped")
         check(engine.getCandidates(session: session, count: -1).isEmpty, "Invalid candidate count is harmless")
         check(engine.getCandidates(session: 0).isEmpty, "Invalid session is harmless")
+
+        // 本地翻译：语言判断、模式与模型目录一致性
+        check(MTTextLanguage.source(for: "今天天气不错") == "zh", "CJK text detected as Chinese")
+        check(MTTextLanguage.source(for: "hello world") == "en", "ASCII text detected as English")
+        check(MTTextLanguage.source(for: "我们用 Swift 写代码") == "zh", "Mixed text with more CJK detected as Chinese")
+        check(MTEngineMode.from("unknown") == .online, "Unknown engine mode falls back to online")
+        check(MTModelCatalog.lightModels.map { $0.id } == ["opus-mt-zh-en", "opus-mt-en-zh"],
+              "Bundled catalog exposes both light directions")
+        check(MTModelCatalog.manifest(forSource: "zh", target: "en")?.id == "opus-mt-zh-en",
+              "Catalog resolves zh to en")
+        check(MTModelCatalog.manifest(forSource: "en", target: "zh-Hans")?.id == "opus-mt-en-zh",
+              "Catalog normalizes zh-Hans to zh")
+        check(MTModelCatalog.manifest(forSource: "zh", target: "ja") == nil,
+              "Unsupported direction has no model")
+        check(MTErrorCode.timeout.isRetryable, "Timeout errors are retryable (fallback to online)")
+        check(!MTErrorCode.modelNotFound.isRetryable, "Missing model errors are not retryable")
         print("Input core regression: \(passed) checks passed")
     }
 }

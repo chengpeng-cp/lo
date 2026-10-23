@@ -13,9 +13,29 @@ struct LOSettings {
     var overlayEnabled = true
     var speechEnabled = false
     var targetLanguage = "en"
+    var mtEngineMode = "online"
+    var mtIdleUnloadMinutes = 10.0
     var segmentPauseThreshold = 3600.0
     var translationDebounceInterval = 3600.0
     static func load() -> LOSettings { value }
+}
+
+// MARK: - 本地翻译替身
+// 该 harness 只编译 Translation/ 与测试文件，这里给出调度器所需的最小定义；
+// 测试总是直接注入 translator，因此替身不会被真正调用。
+
+enum MTEngineMode: String {
+    case online, localFirst, local
+    static func from(_ raw: String) -> MTEngineMode { MTEngineMode(rawValue: raw) ?? .online }
+}
+
+final class HybridTranslator: TranslationServiceProtocol {
+    func translate(text: String, targetLanguage: TargetLanguage) async throws -> String { text }
+}
+
+final class MTEngineClient {
+    static let shared = MTEngineClient()
+    var idleUnloadMinutes: Double = 10
 }
 
 final class SyntheticURLProtocol: URLProtocol {
