@@ -1,5 +1,4 @@
 import Foundation
-import NaturalLanguage
 import LOMTCore
 
 // MARK: - 翻译引擎选项
@@ -21,7 +20,7 @@ enum MTEngineMode: String, CaseIterable {
         case .online:
             return "在线翻译由微软 Edge 提供，无需下载、联网即用；文本会发送到微软服务器。"
         case .light:
-            return "中 → 英约 111 MB；日/法/德/西/俄/阿经英语中转（中→英 + 英→目标）。"
+            return "中 → 英语言包约 111 MB，离线可用、文本不出本机。"
         }
     }
 
@@ -35,46 +34,6 @@ enum MTEngineMode: String, CaseIterable {
 
     /// 是否使用本地模型
     var isLocal: Bool { self != .online }
-}
-
-// MARK: - 语言判断
-
-enum MTTextLanguage {
-
-    /// 判断源语言：优先使用系统语言识别，短文本用 CJK 比例兜底
-    static func source(for text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "zh" }
-
-        let cjkCount = trimmed.unicodeScalars.filter { scalar in
-            (0x4E00...0x9FFF).contains(scalar.value)
-                || (0x3400...0x4DBF).contains(scalar.value)
-                || (0x3040...0x30FF).contains(scalar.value)
-        }.count
-
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(trimmed)
-        let dominant = recognizer.dominantLanguage?.rawValue
-
-        // 日文含假名，优先判为日文；纯汉字且识别置信度低时按中文处理
-        if let dominant {
-            switch dominant {
-            case "ja": return "ja"
-            case "ko": return "ko"
-            case "zh-Hans", "zh-Hant", "zh": return "zh"
-            case "ar": return "ar"
-            case "ru": return "ru"
-            case "fr": return "fr"
-            case "de": return "de"
-            case "es": return "es"
-            case "en": return "en"
-            default: break
-            }
-        }
-
-        if cjkCount > 0 { return "zh" }
-        return "en"
-    }
 }
 
 // MARK: - 本地翻译
@@ -93,35 +52,22 @@ enum LocalMTError: LocalizedError {
     }
 }
 
-/// 本地模型翻译器：优先直达语言包，必要时经英语中转。
+/// 本地模型翻译器：语境输入法的输入默认是中文，直接使用「中文 → 目标语言」语言包。
 final class LocalMTTranslator: TranslationServiceProtocol {
 
     private let store = MTModelStore.shared
     private let client = MTEngineClient.shared
 
     func translate(text: String, targetLanguage: TargetLanguage) async throws -> String {
-        let source = MTModelCatalog.normalized(MTTextLanguage.source(for: text))
         let target = MTModelCatalog.normalized(MTLanguageCatalog.normalizedCode(targetLanguage.rawValue))
 
-        if source == target { return text }
-
-        let route = MTModelCatalog.route(forSource: source, target: target)
-        guard !route.isEmpty else {
-            throw LocalMTError.unsupportedPair("\(source)→\(target)")
+        guard let manifest = MTModelCatalog.manifest(forSource: "zh", target: target) else {
+            throw LocalMTError.unsupportedPair("zh→\(target)")
         }
-
-        let missing = route.filter { !store.isInstalled($0.id) }
-        if let first = missing.first {
-            throw LocalMTError.modelMissing(first.displayName)
+        guard store.isInstalled(manifest.id) else {
+            throw LocalMTError.modelMissing(manifest.displayName)
         }
-
-        if route.count == 1 {
-            return try await run(route[0], text: text, source: source, target: target)
-        }
-
-        // 经英语中转：中文 → English → 目标语言
-        let middle = try await run(route[0], text: text, source: source, target: "en")
-        return try await run(route[1], text: middle, source: "en", target: target)
+        return try await run(manifest, text: text, source: "zh", target: target)
     }
 
     private func run(_ manifest: MTModelManifest,

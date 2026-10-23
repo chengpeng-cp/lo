@@ -10,16 +10,14 @@ import Foundation
 
 enum MTLanguageCatalog {
 
-    /// 在线引擎支持的目标语言（BCP 47）
+    /// 在线引擎支持的目标语言（面向中文输入，不含简繁中文）
     static let onlineCodes: [String] = [
-        "en", "en-GB", "zh-Hans", "zh-Hant", "ja", "ko", "fr", "de", "es", "it",
+        "en", "en-GB", "ja", "ko", "fr", "de", "es", "it",
         "pt", "pt-BR", "ru", "ar", "hi", "th", "vi", "id", "nl", "pl", "tr", "sv", "uk"
     ]
 
-    /// 轻量档可离线翻译的目标语言（其余语言继续使用在线翻译）
-    static let lightCodes: [String] = [
-        "en", "zh-Hans", "ja", "fr", "de", "es", "ru", "ar"
-    ]
+    /// 轻量档：目前开放的中文直译 ONNX 模型只有英文
+    static let lightCodes: [String] = ["en"]
 
     /// 常用语言固定排在前面，其余按中文名排序
     private static let pinnedCodes: [String] = [
@@ -51,7 +49,7 @@ enum MTLanguageCatalog {
     static func capabilityText(for mode: MTEngineMode, count: Int) -> String {
         switch mode {
         case .online: return "在线翻译支持 \(count) 种常用语言。"
-        case .light: return "本地轻量支持 \(count) 种目标语言，按目标下载所需语言包；未列出的语言可用在线翻译。"
+        case .light: return "本地轻量目前支持中文 → English；其他语言请使用在线翻译。"
         }
     }
 

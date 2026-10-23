@@ -219,36 +219,30 @@ struct InputCoreRegression {
         check(engine.getCandidates(session: session, count: -1).isEmpty, "Invalid candidate count is harmless")
         check(engine.getCandidates(session: 0).isEmpty, "Invalid session is harmless")
 
-        // 本地翻译：语言判断、模式与模型目录一致性
-        check(MTTextLanguage.source(for: "今天天气不错") == "zh", "CJK text detected as Chinese")
-        check(MTTextLanguage.source(for: "hello world") == "en", "ASCII text detected as English")
-        check(MTTextLanguage.source(for: "我们用 Swift 写代码") == "zh", "Mixed text with more CJK detected as Chinese")
+        // 本地翻译：模式与模型目录一致性
         check(MTEngineMode.from("unknown") == .online, "Unknown engine mode falls back to online")
         check(MTEngineMode.from("localFirst") == .light, "Legacy local mode maps to light engine")
-        check(MTModelCatalog.lightModels.count == 8,
-              "Light tier ships eight language packs")
-        check(MTModelCatalog.manifest(forSource: "en", target: "ja")?.id == "opus-mt-en-jap",
-              "English to Japanese pack is available")
-        check(MTModelCatalog.packs(forTarget: "ja").map { $0.id } == ["opus-mt-zh-en", "opus-mt-en-jap"],
-              "Japanese target needs Chinese to English plus English to Japanese")
-        check(MTModelCatalog.route(forSource: "zh", target: "ja").count == 2,
-              "Runtime routes Chinese to Japanese through English")
-        check(MTModelCatalog.route(forSource: "en", target: "ja").map { $0.id } == ["opus-mt-en-jap"],
-              "English to Japanese uses a single pack")
-        check(MTLanguageCatalog.lightCodes == ["en", "zh-Hans", "ja", "fr", "de", "es", "ru", "ar"],
-              "Light engine targets eight languages")
-        check(MTLanguageCatalog.normalizedCode("ceb") == "ceb",
-              "Three letter language codes are preserved")
-        check(!MTLanguageCatalog.supports("ko", mode: .light),
-              "Unsupported target is rejected for the light engine")
+        check(MTModelCatalog.lightModels.map { $0.id } == ["opus-mt-zh-en"],
+              "Light tier keeps Chinese to English only")
         check(MTModelCatalog.manifest(forSource: "zh", target: "en")?.id == "opus-mt-zh-en",
               "Catalog resolves zh to en")
-        check(MTModelCatalog.manifest(forSource: "en", target: "zh-Hans")?.id == "opus-mt-en-zh",
-              "Catalog normalizes zh-Hans to zh")
+        check(MTModelCatalog.manifest(forSource: "zh", target: "ja") == nil,
+              "No direct Chinese to Japanese ONNX model")
+        check(MTModelCatalog.manifest(forSource: "en", target: "zh") == nil,
+              "Reverse direction is not bundled")
         check(MTModelCatalog.normalized("zh-Hans") == "zh",
               "Catalog normalizes zh-Hans to zh")
-        check(MTModelCatalog.route(forSource: "zh", target: "ko").isEmpty,
-              "Unsupported direction has no route")
+        check(MTLanguageCatalog.lightCodes == ["en"],
+              "Light engine targets English only")
+        check(!MTLanguageCatalog.onlineCodes.contains("zh-Hans")
+              && !MTLanguageCatalog.onlineCodes.contains("zh-Hant"),
+              "Chinese targets are excluded for Chinese input")
+        check(MTModelCatalog.lightModels[0].files.first?.urls.first?.contains("modelscope.cn") == true,
+              "ModelScope is the primary download source")
+        check(MTLanguageCatalog.normalizedCode("ceb") == "ceb",
+              "Three letter language codes are preserved")
+        check(!MTLanguageCatalog.supports("ja", mode: .light),
+              "Unsupported target is rejected for the light engine")
         check(MTErrorCode.timeout.isRetryable, "Timeout errors are retryable (fallback to online)")
         check(!MTErrorCode.modelNotFound.isRetryable, "Missing model errors are not retryable")
         print("Input core regression: \(passed) checks passed")

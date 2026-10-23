@@ -108,6 +108,9 @@ class LOSettingsView: NSView {
     /// 正在下载的模型 id，避免重复触发
     private var mtDownloading: Set<String> = []
 
+    /// 下载中模型的实时进度（切换目标语言后重建列表时用于恢复状态）
+    private var mtDownloadProgress: [String: (done: Int64, total: Int64)] = [:]
+
     /// 语音播报语速下拉框
     private var speechRatePopup: NSPopUpButton!
 
@@ -1083,7 +1086,7 @@ class LOSettingsView: NSView {
         return [mtPackSummaryLabel, mtPackListStack, mtPackHintLabel]
     }
 
-    /// 当前目标语言需要的语言包（按执行顺序，中→英 在前）
+    /// 当前目标语言需要的语言包
     private func manifestsForCurrentMode() -> [MTModelManifest] {
         guard MTEngineMode.from(settings.mtEngineMode) == .light else { return [] }
         return MTModelCatalog.packs(forTarget: settings.targetLanguage)
@@ -1109,18 +1112,15 @@ class LOSettingsView: NSView {
             mtModelRows[manifest.id] = row
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            if store.isInstalled(manifest.id) {
+
+            if mtDownloading.contains(manifest.id) {
+                let progress = mtDownloadProgress[manifest.id] ?? (0, manifest.bytes)
+                row.apply(.downloading(done: progress.done, total: progress.total))
+            } else if store.isInstalled(manifest.id) {
                 row.apply(.installed(bytes: manifest.bytes))
             } else {
                 row.apply(.notInstalled)
             }
-        }
-    }
-
-    private func applyPackStates() {
-        let store = MTModelStore.shared
-        for (id, row) in mtModelRows where !mtDownloading.contains(id) {
-            row.apply(store.isInstalled(id) ? .installed(bytes: row.manifest.bytes) : .notInstalled)
         }
     }
 
@@ -1152,17 +1152,11 @@ class LOSettingsView: NSView {
         guard mode.isLocal else { return }
 
         let store = MTModelStore.shared
-        if mtDownloading.isEmpty {
-            rebuildPackRows()
-        } else {
-            applyPackStates()
-        }
+        // 目标语言切换后必须重建列表，下载中的模型按进度恢复显示
+        rebuildPackRows()
 
         let fallback = settings.mtFallbackOnline
         let route = manifestsForCurrentMode()
-        let installed = route.filter { store.isInstalled($0.id) }
-        let missing = route.filter { !store.isInstalled($0.id) }
-        let usedBytes = installed.reduce(Int64(0)) { $0 + $1.bytes }
         let hint: String
 
         switch mode {
@@ -1172,25 +1166,16 @@ class LOSettingsView: NSView {
         case .light:
             if route.isEmpty {
                 mtPackSummaryLabel?.stringValue = "当前目标语言不支持本地翻译"
-            } else if route.count == 1 {
-                mtPackSummaryLabel?.stringValue = installed.isEmpty
-                    ? "\(route[0].displayName) · 约 \(Self.sizeText(route[0].bytes))"
-                    : "已安装 · 占用 \(Self.sizeText(usedBytes))"
-            } else {
-                mtPackSummaryLabel?.stringValue = missing.isEmpty
-                    ? "已就绪 · 占用 \(Self.sizeText(usedBytes))（2 个语言包）"
-                    : "该方向需要 2 个语言包 · 已安装 \(installed.count)/2"
-            }
-
-            if route.isEmpty {
                 hint = "当前目标语言暂不支持本地轻量翻译，\(fallback ? "将使用在线翻译" : "本地翻译会提示不支持")。"
-            } else if !missing.isEmpty {
-                let names = missing.map { $0.displayName }.joined(separator: "、")
-                hint = "还需要下载：\(names)。\(fallback ? "下载前暂用在线翻译。" : "未下载时会提示缺少语言包。")"
-            } else if route.count > 1 {
-                hint = "中文文本会先翻译为英文，再翻译为目标语言；两个语言包会同时驻留内存。"
             } else {
-                hint = ""
+                let manifest = route[0]
+                let installed = store.isInstalled(manifest.id)
+                mtPackSummaryLabel?.stringValue = installed
+                    ? "已安装 · 占用 \(Self.sizeText(manifest.bytes))"
+                    : "\(manifest.displayName) · 约 \(Self.sizeText(manifest.bytes))"
+                hint = installed
+                    ? ""
+                    : "点击「下载」后即可离线翻译；\(fallback ? "下载前暂用在线翻译。" : "未下载时会提示缺少语言包。")"
             }
         }
 
@@ -1205,21 +1190,25 @@ class LOSettingsView: NSView {
     private func startDownload(_ manifest: MTModelManifest) {
         guard !mtDownloading.contains(manifest.id) else { return }
         mtDownloading.insert(manifest.id)
+        mtDownloadProgress[manifest.id] = (0, manifest.bytes)
         mtModelRows[manifest.id]?.apply(.downloading(done: 0, total: manifest.bytes))
 
         Task { @MainActor in
             do {
                 try await MTDownloader.shared.download(manifest) { [weak self] done, total in
+                    self?.mtDownloadProgress[manifest.id] = (done, total)
                     self?.mtModelRows[manifest.id]?.apply(.downloading(done: done, total: total))
                 }
                 mtDownloading.remove(manifest.id)
+                mtDownloadProgress.removeValue(forKey: manifest.id)
                 MTEngineClient.shared.resetCircuitBreaker()
                 updateMTStatus()
                 debugLog("[MT] 模型安装完成 \(manifest.id)")
             } catch {
                 mtDownloading.remove(manifest.id)
+                mtDownloadProgress.removeValue(forKey: manifest.id)
                 if case MTDownloader.DownloadError.cancelled = error {
-                    mtModelRows[manifest.id]?.apply(.notInstalled)
+                    updateMTStatus()
                 } else {
                     mtModelRows[manifest.id]?.apply(.failed(error.localizedDescription))
                 }
@@ -1231,6 +1220,7 @@ class LOSettingsView: NSView {
     private func cancelDownload(_ manifest: MTModelManifest) {
         MTDownloader.shared.cancel()
         mtDownloading.remove(manifest.id)
+        mtDownloadProgress.removeValue(forKey: manifest.id)
         MTModelStore.shared.discardPartial(manifest.id)
         updateMTStatus()
     }
@@ -1525,6 +1515,16 @@ class LOSettingsView: NSView {
         let idx = targetLanguagePopup.indexOfSelectedItem
         guard targetLanguageCodes.indices.contains(idx) else { return }
         settings.targetLanguage = targetLanguageCodes[idx]
+
+        // 新目标语言不再需要正在下载的包时取消下载，避免界面与下载状态错位
+        let needed = Set(manifestsForCurrentMode().map { $0.id })
+        for id in Array(mtDownloading) where !needed.contains(id) {
+            MTDownloader.shared.cancel()
+            MTModelStore.shared.discardPartial(id)
+            mtDownloading.remove(id)
+            mtDownloadProgress.removeValue(forKey: id)
+        }
+
         persistSettings()
         updateMTStatus()
     }
