@@ -15,6 +15,7 @@ macos/LOInputMethod/Resources/rime/luna_pinyin.dict.yaml.legacy
 windows/
 
 # ===== 私密文档/脚手架（本地保留，不入库）=====
+.workbuddy/
 .trae/
 docs/
 front/
