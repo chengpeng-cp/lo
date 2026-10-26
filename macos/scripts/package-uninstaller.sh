@@ -75,6 +75,10 @@ chmod 755 "$APP_PATH/Contents/Resources/uninstall.sh"
 echo ""
 echo "[3/4] 签名..."
 IDENTITY="${CODESIGN_IDENTITY:--}"
+# 显式先签主可执行文件再签 bundle：x86_64 的链接器不会像 arm64 那样自动做 ad-hoc 签名，
+# 主程序会以「未签名」状态进来，靠 `--deep` 兜底在 Intel 上不可靠。
+codesign --force --options runtime --identifier "$BUNDLE_ID" -s "$IDENTITY" \
+    "$APP_PATH/Contents/MacOS/$APP_NAME"
 codesign --force --deep --options runtime \
     --identifier "$BUNDLE_ID" \
     -s "$IDENTITY" "$APP_PATH"
