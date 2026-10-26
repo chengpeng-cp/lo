@@ -55,16 +55,31 @@ private final class MockInputClient: NSObject, IMKTextInput {
     func overrideKeyboard(withKeyboardNamed keyboardUniqueName: String!) {}
     func selectMode(_ modeIdentifier: String!) {}
     func supportsUnicode() -> Bool { true }
-    func bundleIdentifier() -> String! { "lo.regression.mock" }
+    /// 并非所有 IMK 客户端都实现 bundleIdentifier()：macOS 26/27 起，
+    /// 经由 ViewBridge / 远程视图宿主接入的客户端实测返回 nil。
+    /// 允许测试置空，用于覆盖「切到输入法即崩溃」的回归。
+    var bundleIdentifierValue: String? = "lo.regression.mock"
+    func bundleIdentifier() -> String! { bundleIdentifierValue }
+    /// 允许测试模拟 IMK 换代理实例：换对象但稳定身份不变。
+    var clientIdentifierValue: String? = "lo-regression-mock"
     func windowLevel() -> Int32 { 0 }
     func supportsProperty(_ property: TSMDocumentPropertyTag) -> Bool { false }
-    func uniqueClientIdentifierString() -> String! { "lo-regression-mock" }
+    func uniqueClientIdentifierString() -> String! { clientIdentifierValue }
     func string(from range: NSRange, actualRange: NSRangePointer!) -> String! {
         actualRange?.pointee = range
         return (text as NSString).substring(with: range)
     }
     func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer!) -> NSRect {
         NSRect(x: 200, y: 500, width: 1, height: 20)
+    }
+}
+
+/// 记录销毁动作的引擎：会话回收是否真的发生，只能从这里观察。
+private final class RecordingEngine: RimeEngine {
+    var destroyed: [RimeSessionId] = []
+    override func destroySession(_ id: RimeSessionId) {
+        destroyed.append(id)
+        super.destroySession(id)
     }
 }
 
@@ -143,6 +158,18 @@ struct InputCoreRegression {
         client.insertText("，", replacementRange: LOTextInsertion.replacementRange(
             markedRange: noMarkedText, selectedRange: client.selectedRange()))
         check(client.text == "，", "A leading punctuation commit inserts into an empty client")
+        // 回归：客户端可能不实现 bundleIdentifier()（macOS 26/27 经 ViewBridge 接入的客户端返回 nil）。
+        // 旧实现在 activateServer 的日志里直接取值，命中「Unexpectedly found nil」→ SIGTRAP，
+        // 整个输入法进程当场退出，用户侧表现为「一切到输入法就崩」。
+        let nilBundleClient = MockInputClient()
+        nilBundleClient.bundleIdentifierValue = nil
+        check(LOInputController.clientBundleID(nilBundleClient) == "<unknown client>",
+            "A client without a bundle identifier must not break activation")
+        check(LOInputController.clientBundleID(nil) == "nil",
+            "A nil client is reported without crashing")
+        check(LOInputController.clientBundleID(NSObject()) == "NSObject",
+            "A non-IMK client is described by its type")
+
         var tap = LOShiftTapState()
         func pollTap(_ shiftDown: Bool, at time: TimeInterval, other: Bool = false, mouse: Bool = false, nonMod: Bool = false) -> Bool {
             LOShiftTapDecision.evaluate(
@@ -218,6 +245,58 @@ struct InputCoreRegression {
         check(RimeEngine.convertKeyCode(117) == 0xFFFF, "Forward Delete is mapped")
         check(engine.getCandidates(session: session, count: -1).isEmpty, "Invalid candidate count is harmless")
         check(engine.getCandidates(session: 0).isEmpty, "Invalid session is harmless")
+
+        // 会话回收：IMK 客户端是远程代理对象，每次激活/切源都可能换成新实例。
+        // 按对象地址做 key 会让 activate 与 deactivate 配不上，会话只增不减。
+        let tracker = RecordingEngine()
+        let manager = RimeSessionManager(engine: tracker)
+
+        let firstProxy = MockInputClient()
+        firstProxy.clientIdentifierValue = "client-same"
+        let renewedProxy = MockInputClient()
+        renewedProxy.clientIdentifierValue = "client-same"
+
+        let reused = manager.sessionForClient(firstProxy)
+        check(reused != 0, "Session manager creates a session")
+        check(manager.sessionForClient(renewedProxy) == reused,
+            "A renewed client proxy reuses the session by stable identity")
+        check(manager.activeSessionCount == 1, "One client keeps exactly one session")
+        manager.removeSession(for: renewedProxy)
+        check(manager.activeSessionCount == 0, "Deactivation releases the session")
+        check(tracker.destroyed == [reused],
+            "The matching session is destroyed, not leaked")
+
+        // 控制器要靠返回值判断「我刚释放的是不是手上这条会话」，以及它是否还活着。
+        let readopted = manager.sessionForClient(firstProxy)
+        check(readopted != 0 && manager.isAlive(readopted), "A newly created session reports as alive")
+        check(manager.removeSession(for: firstProxy) == readopted,
+            "Deactivation reports which session was released")
+        check(!manager.isAlive(readopted), "A released session reports as dead")
+        check(manager.removeSession(for: firstProxy) == 0,
+            "Deactivating twice does not release anything")
+
+        // 身份漂移：客户端换了身份且没等到 deactivate，激活下一条时必须兜底回收。
+        let drifting = MockInputClient()
+        drifting.clientIdentifierValue = "client-drift-a"
+        let abandoned = manager.sessionForClient(drifting)
+        let drifted = MockInputClient()
+        drifted.clientIdentifierValue = "client-drift-b"
+        let fresh = manager.sessionForClient(drifted)
+        check(fresh != abandoned, "A different client gets a different session")
+        check(manager.activeSessionCount == 1,
+            "An abandoned session is reclaimed even without deactivation")
+        check(tracker.destroyed.contains(abandoned), "The abandoned session is destroyed")
+
+        // 兜底上限：无论身份怎么漂移，会话数都不能无限增长。
+        for index in 0..<(RimeSessionManager.maxSessions + 4) {
+            let client = MockInputClient()
+            client.clientIdentifierValue = "client-cap-\(index)"
+            _ = manager.sessionForClient(client)
+        }
+        check(manager.activeSessionCount <= RimeSessionManager.maxSessions,
+            "Session count stays bounded regardless of identity drift")
+        manager.removeAllSessions()
+        check(manager.activeSessionCount == 0, "Removing all sessions clears the pool")
 
         // 本地翻译：模式与模型目录一致性
         check(MTEngineMode.from("unknown") == .online, "Unknown engine mode falls back to online")

@@ -119,19 +119,21 @@ class LOInputController: IMKInputController {
 
         // 配置翻译调度器回调：连接 TranslationScheduler ↔ 悬浮窗 / 语音播报
         // 三者相互独立：悬浮窗由 overlayEnabled 控制，播报由 speechEnabled 控制
-        MainActor.assumeIsolated {
+        // 闭包只持有调度器单例，不捕获 self，避免控制器与单例互相持有导致泄漏
+        let scheduler = translationScheduler
+        Self.runOnMainActor {
             // 防抖期间：静默更新悬浮窗上行原文（不闪烁）
-            translationScheduler.onOriginalUpdate = { text in
+            scheduler.onOriginalUpdate = { text in
                 guard LOSettings.load().overlayEnabled else { return }
                 LOTranslationOverlay.shared.silentUpdateOriginal(text)
             }
             // 翻译开始：显示 loading
-            translationScheduler.onTranslationStart = { text in
+            scheduler.onTranslationStart = { text in
                 guard LOSettings.load().overlayEnabled else { return }
                 LOTranslationOverlay.shared.showLoading(originalText: text)
             }
             // 文本段完成：译文为 nil 表示未调用翻译（仅显示/播报原文）
-            translationScheduler.onTranslationReady = { original, translation in
+            scheduler.onTranslationReady = { original, translation in
                 if LOSettings.load().overlayEnabled {
                     if let translation = translation {
                         LOTranslationOverlay.shared.show(originalText: original, translation: translation)
@@ -147,19 +149,19 @@ class LOInputController: IMKInputController {
                 }
             }
             // 翻译失败：显示错误，避免悬浮窗卡在 loading 状态
-            translationScheduler.onTranslationFailed = { original, error in
+            scheduler.onTranslationFailed = { original, error in
                 guard LOSettings.load().overlayEnabled else { return }
                 LOTranslationOverlay.shared.showError(originalText: original, error: error)
             }
             // 用户删除了段落末尾的内容：立即清空已过期的译文，停止朗读旧内容
-            translationScheduler.onSegmentTrimmed = { text in
+            scheduler.onSegmentTrimmed = { text in
                 SpeechPlayer.shared.stop()
                 guard LOSettings.load().overlayEnabled,
                       LOTranslationOverlay.shared.isVisible else { return }
                 LOTranslationOverlay.shared.showEditing(originalText: text)
             }
             // 段落被全部删除：悬浮窗没有可展示的内容，直接隐藏
-            translationScheduler.onSegmentCleared = {
+            scheduler.onSegmentCleared = {
                 SpeechPlayer.shared.stop()
                 guard LOSettings.load().overlayEnabled else { return }
                 LOTranslationOverlay.shared.hide()
@@ -183,13 +185,28 @@ class LOInputController: IMKInputController {
         sessionManager.removeAllSessions()
     }
 
+    /// 把必须跑在主线程的工作安全地投递到主线程。
+    ///
+    /// IMK 并不保证 `init(server:delegate:client:)` 与 `activateServer(_:)` 一定在主线程调用
+    /// （不同 macOS 版本的实现不一样）。直接 `MainActor.assumeIsolated` 在非主线程会触发
+    /// 「Incorrect actor executor assumption」→ SIGTRAP，用户侧同样表现为「一切到输入法就崩」。
+    private static func runOnMainActor(_ work: @escaping @MainActor () -> Void) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { work() }
+        } else {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { work() }
+            }
+        }
+    }
+
     /// 将用户设置应用到翻译悬浮窗
     private func applySettingsToOverlay() {
         let s = LOSettings.load()
         userSettings = s
         LOTranslationOverlay.shared.config = s.overlayConfig
         // 关闭播报时立即停止正在朗读的内容（activateServer 与设置通知都在主线程）
-        MainActor.assumeIsolated {
+        Self.runOnMainActor {
             SpeechPlayer.shared.reloadSettings()
         }
     }
@@ -248,10 +265,21 @@ class LOInputController: IMKInputController {
 
     // MARK: - 输入法生命周期
 
-    /// 读取客户端所属 App 的 bundle ID，用于诊断日志
-    private static func clientBundleID(_ client: Any?) -> String {
-        guard let c = client as? IMKTextInput else { return String(describing: client) }
-        return c.bundleIdentifier()
+    /// 读取客户端所属 App 的 bundle ID，用于诊断日志。
+    ///
+    /// 注意：`IMKTextInput.bundleIdentifier()` 由 ObjC 导入为隐式解包可选值（`String!`）。
+    /// 并非所有客户端都会实现它——macOS 26/27 起，经由 ViewBridge / 远程视图宿主
+    /// （`+[NSServiceViewController withHostAppAuditToken:invoke:]` 那条路径）接入的客户端
+    /// 实测返回 nil。此时直接取值会触发
+    /// 「Unexpectedly found nil while implicitly unwrapping an Optional value」→ SIGTRAP，
+    /// 整个输入法进程当场退出（用户侧表现为「一切到输入法就崩」）。
+    /// 这里只用于日志，绝不能因为拿不到 bundle ID 就中断激活流程。
+    /// `internal` 而非 `private`：供 InputCoreRegression 直接覆盖这条崩溃路径。
+    static func clientBundleID(_ client: Any?) -> String {
+        guard let c = client as? IMKTextInput else {
+            return client.map { String(describing: type(of: $0)) } ?? "nil"
+        }
+        return c.bundleIdentifier() ?? "<unknown client>"
     }
 
     /// 输入法被激活时调用
@@ -319,9 +347,16 @@ class LOInputController: IMKInputController {
         candidateWindow.hide()
         // 移除当前客户端的会话
         if let client = client {
-            sessionManager.removeSession(for: client)
+            let released = sessionManager.removeSession(for: client)
+            // 只有「被释放的就是我正在用的会话」或「我正在用的会话已经没了」时才清空。
+            // 直接无条件清零会在「先 activate 新客户端、再 deactivate 旧客户端」的
+            // 交错时序里把新客户端的会话指针抹掉，表现为输入法突然不响应按键。
+            if released == currentSession || !sessionManager.isAlive(currentSession) {
+                currentSession = 0
+            }
+        } else {
+            currentSession = 0
         }
-        currentSession = 0
 
         // 取消激活控制器标记
         if LOInputController.activeController === self {
