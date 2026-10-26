@@ -40,7 +40,11 @@
 
 ### macOS
 
-**系统要求**：下载与你的 CPU 架构和系统版本匹配的安装包。源码的 Swift 部署目标为 macOS 13，但最终安装包的最低系统版本取决于 librime 等依赖；打包脚本会将真实最低版本写入应用。当前构建为本机架构，不会自动生成 Universal 安装包。
+**系统要求**：按 Mac 芯片下载对应安装包——Apple Silicon（`arm64`）与 Intel（`x86_64`）各一个，代码功能完全一致，只是编译架构不同。
+
+最低系统版本**以安装包内 `Info.plist` 的 `LSMinimumSystemVersion` 为准**。源码的 Swift 部署目标（macOS 13）只是下限，实际值由 librime、ONNX Runtime 等依赖的 `minos` 决定，打包脚本会把真实值写进应用并在结束时打印。当前依赖链实测为 **macOS 15.0**，所以不要按「macOS 13 即可运行」对外说明。
+
+> **Intel 说明**：Apple 已确认 macOS 26 是最后一个支持 Intel Mac 的系统（macOS 27 起仅支持 Apple Silicon），因此 Intel 包的实际适用范围是 macOS 15–26。另外 GitHub 的 x86_64 构建镜像将于 2027 年 8 月退役，届时需自托管 Intel 机器或停止 Intel 支持。
 
 1. 下载 `LOInputMethod-<version>-<arch>.dmg`
 2. 双击挂载 DMG，将「语境输入法安装器」拖到「应用程序」文件夹（同一镜像内还带有「语境输入法卸载工具」，重装或测试前用它清理旧版本）

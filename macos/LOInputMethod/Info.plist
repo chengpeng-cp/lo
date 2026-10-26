@@ -73,7 +73,9 @@
     <key>LSUIElement</key>
     <true/>
 
-    <!-- 最低系统版本 -->
+    <!-- 最低系统版本（下限，仅作编译期声明）
+         真实值由 scripts/assemble-app.sh 按 librime / ONNX Runtime 等依赖的最大 minos
+         覆盖写入，当前构建实测为 15.0。对外宣传请以安装包内实际值为准，不要引用这里的 13.0。 -->
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
 

@@ -337,11 +337,15 @@ gh run view <run-id> --log-failed
 ### 构建流程
 
 **macOS workflow：**
-1. 在 `macos-14` runner 上运行
+1. 矩阵构建两个架构：`macos-14`（arm64）与 `macos-15-intel`（x86_64），跑的是同一套 `package.sh`
 2. 用 Homebrew 安装 librime
-3. 调用 `macos/scripts/package.sh` 完成构建
-4. 生成 `.dmg` 安装镜像
-5. 上传 artifact / 发布 Release
+3. 调用 `macos/scripts/package.sh` 完成构建（`LO_VERSION` 由 tag 传入，写进三个 Info.plist）
+4. 生成 `.dmg` 安装镜像，按 `<版本>-<架构>` 重命名
+5. 各架构上传 artifact；tag 触发时由独立的 `publish` job 汇总两个 dmg 统一发布 Release
+
+> 架构说明：macOS 26 是最后一个支持 Intel Mac 的系统（macOS 27 起仅 Apple Silicon）；
+> GitHub 的 x86_64 镜像已确认 2027-08 退役，之后需自托管 Intel 机器或停掉 Intel 支持。
+> 打包脚本不写死架构，产物架构由 `lipo -archs` 自适应，并会断言与 runner 架构一致。
 
 **Windows workflow：**
 1. 在 `windows-latest` runner 上运行

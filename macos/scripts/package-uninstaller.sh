@@ -35,7 +35,11 @@ APP_NAME="LOUninstaller"
 APP_DISPLAY="语境输入法卸载工具"
 BUNDLE_ID="com.lo.inputmethod.uninstaller"
 
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT_DIR/LOInputMethod/Info.plist")"
+# 版本号与安装包保持一致：CI 传 LO_VERSION，本地在 tag 上打包自动取 tag，否则用 Info.plist 默认值
+# shellcheck source=scripts/lib-version.sh
+source "$ROOT_DIR/scripts/lib-version.sh"
+VERSION="$(resolve_lo_version "$ROOT_DIR" "$ROOT_DIR/LOInputMethod/Info.plist")"
+export LO_VERSION="$VERSION"
 
 BUILD_DIR="$ROOT_DIR/Uninstaller/.build/release"
 STAGING_DIR="$ROOT_DIR/.build/staging-uninstaller"
@@ -61,6 +65,7 @@ rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 cp "$BUILD_DIR/$APP_NAME" "$APP_PATH/Contents/MacOS/$APP_NAME"
 cp "$ROOT_DIR/Uninstaller/Resources/Info.plist" "$APP_PATH/Contents/Info.plist"
+stamp_lo_version "$APP_PATH/Contents/Info.plist" "$VERSION"
 cp "$ROOT_DIR/LOInputMethod/Resources/AppIcon.icns" "$APP_PATH/Contents/Resources/AppIcon.icns"
 
 # 清理逻辑只有一份：直接复用 scripts/uninstall.sh
