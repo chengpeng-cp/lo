@@ -69,6 +69,10 @@ else
 fi
 ln -sf libonnxruntime.1.20.1.dylib "$DEST/Contents/Frameworks/libonnxruntime.dylib"
 strip -x "$ORT_DEST" 2>/dev/null || true
+# `lipo -thin` 会重写文件、`strip` 会削符号表，两者都会让 onnxruntime 原有的签名失效。
+# 必须当场重签：bundle 里只要留一个未签名的 Mach-O，后面任何一次嵌套签名都会被 codesign
+# 拒绝（Intel 上就是这样一路踩过来的，见文末说明）。
+sign_component "$ORT_DEST" "libonnxruntime.1.20.1.dylib"
 
 # Homebrew bottles may require a newer OS than the Swift deployment target.
 MIN_OS="$(otool -l "$DEST/Contents/MacOS/LOInputMethod" "$DEST/Contents/Frameworks/"*.dylib | awk '$1 == "minos" {split($2, p, "."); n=p[1]*10000+p[2]*100+p[3]; if(n>max){max=n; version=$2}} END {print version}')"
