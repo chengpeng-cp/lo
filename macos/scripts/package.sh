@@ -16,8 +16,12 @@ INSTALLER_NAME="LOInstaller"
 BUNDLE_ID="com.lo.inputmethod.ime"
 INSTALLER_BUNDLE_ID="com.lo.inputmethod.installer"
 
-# 版本号从输入法 Info.plist 读取，避免多处硬编码
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT_DIR/LOInputMethod/Info.plist")"
+# 版本号：CI 通过 LO_VERSION 传入 tag 版本，本地在 tag 上打包则自动取 tag；
+# 否则回退到 Info.plist 的开发默认值。解析一次并导出，组装脚本与安装器共用同一份。
+# shellcheck source=scripts/lib-version.sh
+source "$ROOT_DIR/scripts/lib-version.sh"
+VERSION="$(resolve_lo_version "$ROOT_DIR" "$ROOT_DIR/LOInputMethod/Info.plist")"
+export LO_VERSION="$VERSION"
 
 # 目录
 BUILD_DIR="$ROOT_DIR/.build/release"
@@ -66,6 +70,8 @@ mkdir -p "$INSTALLER_APP/Contents/MacOS"
 mkdir -p "$INSTALLER_APP/Contents/Resources"
 cp "$INSTALLER_BUILD_DIR/$INSTALLER_NAME" "$INSTALLER_APP/Contents/MacOS/$INSTALLER_NAME"
 cp "$ROOT_DIR/Installer/Resources/Info.plist" "$INSTALLER_APP/Contents/Info.plist"
+# 安装器也要报真实版本，否则「关于」里永远显示 1.0.0
+stamp_lo_version "$INSTALLER_APP/Contents/Info.plist" "$VERSION"
 MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PAYLOAD_APP/Contents/Info.plist")"
 /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MIN_OS" "$INSTALLER_APP/Contents/Info.plist"
 cp "$ROOT_DIR/LOInputMethod/Resources/AppIcon.icns" "$INSTALLER_APP/Contents/Resources/AppIcon.icns"
@@ -77,6 +83,10 @@ cp -R "$PAYLOAD_APP" "$INSTALLER_APP/Contents/Resources/$APP_NAME.app"
 # 稳定证书能让辅助功能授权在重装后继续有效；CI 无证书时回退 ad-hoc。
 echo "  签名安装器..."
 IDENTITY="${CODESIGN_IDENTITY:--}"
+# 显式先签主可执行文件再签 bundle：x86_64 的链接器不会像 arm64 那样自动做 ad-hoc 签名，
+# 主程序会以「未签名」状态进来，靠 `--deep` 兜底在 Intel 上不可靠。
+codesign --force --options runtime --identifier "$INSTALLER_BUNDLE_ID" -s "$IDENTITY" \
+    "$INSTALLER_APP/Contents/MacOS/$INSTALLER_NAME"
 codesign --force --deep --options runtime \
     --identifier "$INSTALLER_BUNDLE_ID" \
     -s "$IDENTITY" "$INSTALLER_APP"
@@ -134,6 +144,9 @@ echo "=========================================="
 echo "  打包完成"
 echo "=========================================="
 echo "安装镜像: $DMG_PATH"
+echo "版本:     v$VERSION"
+echo "架构:     $(lipo -archs "$PAYLOAD_APP/Contents/MacOS/LOInputMethod")"
+echo "最低系统: macOS $MIN_OS"
 echo ""
 echo "分发说明："
 echo "  - 未用开发者证书签名公证时，用户首次打开需在「系统设置 › 隐私与安全性」"
